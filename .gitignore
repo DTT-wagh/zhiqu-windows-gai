@@ -1,0 +1,18 @@
+# Local secrets
+server/.env
+
+# Runtime state
+server/data/
+server/logs/
+server/*-runtime*.log
+frontend/*-runtime*.log
+
+# Patch backups and compilation scratch space
+server/zhiqu-server.jar.before-*
+server/.patch-*/
+server/patch-src/class-inspection/
+javac.*.args
+
+# Operating system files
+.DS_Store
+Thumbs.db
