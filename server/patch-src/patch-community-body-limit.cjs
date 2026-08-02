@@ -4,8 +4,8 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
-const jarPath = path.join(projectRoot, 'server', 'zhiqu-server.jar');
-const backupPath = path.join(projectRoot, 'server', 'zhiqu-server.jar.before-community-body-limit');
+const jarPath = process.env.ZHIQU_SERVER_JAR || path.join(projectRoot, 'server', 'zhiqu-server.jar');
+const backupPath = process.env.ZHIQU_SERVER_BACKUP || path.join(projectRoot, 'server', 'zhiqu-server.jar.before-community-body-limit');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zhiqu-community-body-'));
 
 function runJar(args, cwd) {
@@ -40,7 +40,9 @@ function patchClass(relativePath, patches) {
 }
 
 try {
-  fs.copyFileSync(jarPath, backupPath, fs.constants.COPYFILE_EXCL);
+  if (process.env.ZHIQU_CREATE_BACKUP !== '0' && !fs.existsSync(backupPath)) {
+    fs.copyFileSync(jarPath, backupPath, fs.constants.COPYFILE_EXCL);
+  }
 
   const communityClasses = 'BOOT-INF/classes/com/zhiqu/server/community';
   const migrationPath = 'BOOT-INF/classes/db/migration/V37__expand_community_question_body.sql';

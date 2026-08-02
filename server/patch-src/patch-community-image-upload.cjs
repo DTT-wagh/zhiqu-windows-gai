@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
-const jarPath = path.join(projectRoot, 'server', 'zhiqu-server.jar');
+const jarPath = process.env.ZHIQU_SERVER_JAR || path.join(projectRoot, 'server', 'zhiqu-server.jar');
 const sourcePath = path.join(__dirname, 'com', 'zhiqu', 'server', 'community', 'CommunityImageController.java');
 const classPath = 'BOOT-INF/classes/com/zhiqu/server/community/CommunityImageController.class';
 // Keep compiler inputs inside the workspace. On this Windows setup javac cannot

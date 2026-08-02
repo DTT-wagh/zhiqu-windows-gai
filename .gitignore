@@ -4,6 +4,7 @@ server/.env
 # Runtime state
 server/data/
 server/logs/
+server/generated/
 server/*-runtime*.log
 frontend/*-runtime*.log
 

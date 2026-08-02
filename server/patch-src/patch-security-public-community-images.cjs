@@ -4,7 +4,7 @@ const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
 const serverRoot = path.join(projectRoot, 'server');
-const jarPath = path.join(serverRoot, 'zhiqu-server.jar');
+const jarPath = process.env.ZHIQU_SERVER_JAR || path.join(serverRoot, 'zhiqu-server.jar');
 const sourcePath = path.join(__dirname, 'com', 'zhiqu', 'server', 'config', 'SecurityConfig.java');
 const classPath = 'BOOT-INF/classes/com/zhiqu/server/config/SecurityConfig.class';
 const tempRoot = fs.mkdtempSync(path.join(serverRoot, '.patch-community-image-security-'));

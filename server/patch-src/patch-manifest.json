@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "baselineJar": "server/zhiqu-server.jar",
+  "baselineSha256": "49A5CF1B09C5F26CB36FFAC8683C63988C1367A994AC16DB6C1B2844E8380147",
+  "baselineContains": [
+    "community-question-body-3000",
+    "community-public-image-read",
+    "community-answer-image-upload",
+    "magic-image-api"
+  ],
+  "patches": []
+}
