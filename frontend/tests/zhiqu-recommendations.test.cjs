@@ -67,6 +67,18 @@ assert.deepEqual({ ...rules.weights }, {
 
 assert.equal(rules.usable(base({ ageBand: ['11-12'] }), new Set()), true, 'age must not filter a hot recommendation');
 assert.equal(rules.usable(base({ reviewStatus: 'PENDING' }), new Set()), false, 'unreviewed content must be filtered');
+const missingReviewStatus = { ...base() };
+delete missingReviewStatus.reviewStatus;
+const missingSafetyStatus = { ...base() };
+delete missingSafetyStatus.safetyStatus;
+const missingChildSafe = { ...base() };
+delete missingChildSafe.childSafe;
+assert.equal(rules.normalize(missingReviewStatus).reviewStatus, 'UNKNOWN', 'missing review status must fail closed');
+assert.equal(rules.normalize(missingSafetyStatus).safetyStatus, 'UNKNOWN', 'missing safety status must fail closed');
+assert.equal(rules.normalize(missingChildSafe).childSafe, false, 'missing child-safe flag must fail closed');
+assert.equal(rules.usable(rules.normalize(missingReviewStatus), new Set()), false, 'missing review status must not be recommended');
+assert.equal(rules.usable(rules.normalize(missingSafetyStatus), new Set()), false, 'missing safety status must not be recommended');
+assert.equal(rules.usable(rules.normalize(missingChildSafe), new Set()), false, 'missing child-safe flag must not be recommended');
 assert.equal(rules.usable(base({ containsAdvertising: true }), new Set()), false, 'advertising content must be filtered');
 assert.equal(rules.usable(base({ coverUrl: 'https://cdn.example/cover.jpg' }), new Set()), false, 'placeholder covers must be filtered');
 assert.equal(rules.usable(base({ videoUrl: 'not-a-video-url' }), new Set()), false, 'invalid video URLs must be filtered');
@@ -89,7 +101,7 @@ assert.deepEqual(ranked.map((item) => item.id), rules.rerank(seriesCandidates.ma
 
 const untouchedProgress = base({ id: 'progress-same', completed: false, progressSeconds: 0, watchedPercent: 0 });
 const completedProgress = base({ id: 'progress-same', completed: true, progressSeconds: 120, watchedPercent: 100 });
-assert.equal(rules.score(untouchedProgress, 0).score, rules.score(completedProgress, 0).score, 'personal learning progress must not change hot ranking score');
+assert.ok(Math.abs(rules.score(untouchedProgress, 0).score - rules.score(completedProgress, 0).score) < 1e-6, 'personal learning progress must not change hot ranking score');
 const youngerAudience = base({ id: 'age-same', ageBand: ['6-8'] });
 const olderAudience = base({ id: 'age-same', ageBand: ['11-12'] });
 assert.equal(rules.score(youngerAudience, 0).score, rules.score(olderAudience, 0).score, 'age metadata must not change hot ranking score');

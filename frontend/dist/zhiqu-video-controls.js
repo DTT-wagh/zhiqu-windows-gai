@@ -2,15 +2,9 @@
   if (globalThis.__zqVideoControlsInstalled) return;
   globalThis.__zqVideoControlsInstalled = true;
 
-  const QUALITY_LABELS = ['自动', '480P', '720P', '1080P'];
   const SPEED_LABELS = ['0.75x', '1x', '1.25x', '1.5x', '2x'];
-  const SUBTITLE_LABELS = ['关闭', '开启', '中文', '中', '简体中文', 'English'];
   const instances = new WeakMap();
   let scanScheduled = false;
-
-  function normalize(value) {
-    return String(value || '').replace(/\s+/g, ' ').trim();
-  }
 
   function formatTime(value) {
     if (!Number.isFinite(value) || value < 0) return '00:00';
@@ -22,29 +16,35 @@
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   }
 
-  function buttonText(button) {
-    return normalize(button?.textContent);
-  }
-
-  function findButtons(root, labels) {
-    if (!root) return [];
-    return Array.from(root.querySelectorAll('button')).filter((button) => labels.includes(buttonText(button)));
-  }
-
-  function selectedButtonLabel(buttons, fallback) {
-    const selected = buttons.find((button) =>
-      button.getAttribute('aria-pressed') === 'true' ||
-      button.getAttribute('aria-selected') === 'true' ||
-      button.classList.contains('r-enb5s8')
-    );
-    return buttonText(selected) || fallback;
-  }
-
   function findControlsRoot(video) {
     const host = video.parentElement;
     const wrapper = host?.parentElement;
     if (!host || !wrapper) return null;
     return Array.from(wrapper.children).find((child) => child !== host && child.querySelector('button')) || null;
+  }
+
+  function nativeSubtitleOptions(video) {
+    const tracks = Array.from(video.textTracks || []);
+    const labels = tracks.map((track, index) => track.label || track.language || `字幕 ${index + 1}`);
+    return labels.length ? ['关闭', ...labels] : [];
+  }
+
+  function capabilitiesFor(video) {
+    const provider = globalThis.__zqVideoControlProvider;
+    let supplied = {};
+    if (typeof provider === 'function') {
+      try { supplied = provider(video) || {}; } catch {}
+    }
+    return {
+      qualityOptions: Array.isArray(supplied.qualityOptions) ? supplied.qualityOptions.map(String) : [],
+      currentQuality: supplied.currentQuality || '',
+      setQuality: typeof supplied.setQuality === 'function' ? supplied.setQuality : null,
+      subtitleOptions: Array.isArray(supplied.subtitleOptions)
+        ? supplied.subtitleOptions.map(String)
+        : nativeSubtitleOptions(video),
+      currentSubtitle: supplied.currentSubtitle || '',
+      setSubtitle: typeof supplied.setSubtitle === 'function' ? supplied.setSubtitle : null,
+    };
   }
 
   function createElement(tag, className, text) {
@@ -203,16 +203,14 @@
     }
 
     const controlsRoot = findControlsRoot(video);
-    const qualityButtons = findButtons(controlsRoot, QUALITY_LABELS);
-    const speedButtons = findButtons(controlsRoot, SPEED_LABELS);
-    const subtitleButtons = findButtons(controlsRoot, SUBTITLE_LABELS);
-    const qualityOptions = qualityButtons.length ? qualityButtons.map(buttonText) : [];
-    const speedOptions = speedButtons.length ? speedButtons.map(buttonText) : SPEED_LABELS.filter((label) => label !== '2x');
-    const subtitleOptions = subtitleButtons.length ? subtitleButtons.map(buttonText) : [];
-    const initialQuality = selectedButtonLabel(qualityButtons, qualityOptions[0] || '');
+    const capabilities = capabilitiesFor(video);
+    const qualityOptions = capabilities.qualityOptions;
+    const speedOptions = SPEED_LABELS;
+    const subtitleOptions = capabilities.subtitleOptions;
+    const initialQuality = capabilities.currentQuality || qualityOptions[0] || '';
     const rateLabel = speedOptions.find((label) => Math.abs(Number.parseFloat(label) - video.playbackRate) < 0.01);
-    const initialSpeed = rateLabel || selectedButtonLabel(speedButtons, '1x');
-    const initialSubtitle = subtitleOptions[0] || '';
+    const initialSpeed = rateLabel || '1x';
+    const initialSubtitle = capabilities.currentSubtitle || subtitleOptions[0] || '';
 
     addStyles();
     host.classList.add('zq-video-host');
@@ -287,18 +285,10 @@
     }
     createMenu('quality', qualityOptions);
     createMenu('speed', speedOptions);
+    createMenu('subtitle', subtitleOptions);
     host.appendChild(overlay);
 
     const state = { currentQuality: initialQuality, currentSpeed: initialSpeed, currentSubtitle: initialSubtitle, hideTimer: null, volumeHideTimer: null };
-    function originalButton(root, labels, label) {
-      return findButtons(root, labels).find((button) => buttonText(button) === label) || null;
-    }
-    function clickOriginal(root, labels, label) {
-      const button = originalButton(root, labels, label);
-      if (!button) return false;
-      button.click();
-      return true;
-    }
     function updateProgress() {
       const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
       const current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
@@ -372,7 +362,7 @@
     }
     function chooseQuality(value) {
       state.currentQuality = value;
-      clickOriginal(controlsRoot, QUALITY_LABELS, value);
+      try { capabilities.setQuality?.(value); } catch {}
       setChoice(quality, '清晰度', value);
       setActive(menus.quality, value);
       closeMenus();
@@ -382,24 +372,28 @@
     function chooseSpeed(value) {
       const rate = Number.parseFloat(value);
       if (Number.isFinite(rate)) video.playbackRate = rate;
-      state.currentSpeed = rate;
-      clickOriginal(controlsRoot, SPEED_LABELS, value);
-      window.setTimeout(() => { video.playbackRate = rate; }, 0);
+      state.currentSpeed = value;
       setChoice(speed, '倍速', value);
       setActive(menus.speed, value);
       closeMenus();
       closeVolumePanel();
       showControls();
     }
-    function toggleSubtitle() {
-      const sourceButton = findButtons(controlsRoot, SUBTITLE_LABELS)[0];
-      if (!sourceButton) return;
-      sourceButton.click();
-      window.setTimeout(() => {
-        const current = findButtons(controlsRoot, SUBTITLE_LABELS)[0];
-        state.currentSubtitle = buttonText(current) || state.currentSubtitle;
-        setChoice(subtitle, '字幕', state.currentSubtitle);
-      }, 0);
+    function chooseSubtitle(value) {
+      state.currentSubtitle = value;
+      try {
+        if (capabilities.setSubtitle) {
+          capabilities.setSubtitle(value);
+        } else {
+          const tracks = Array.from(video.textTracks || []);
+          tracks.forEach((track, index) => {
+            const label = track.label || track.language || `字幕 ${index + 1}`;
+            track.mode = value !== '关闭' && label === value ? 'showing' : 'disabled';
+          });
+        }
+      } catch {}
+      setChoice(subtitle, '字幕', value);
+      setActive(menus.subtitle, value);
       closeMenus();
       closeVolumePanel();
       showControls();
@@ -434,7 +428,7 @@
     fullscreen.addEventListener('click', (event) => { event.stopPropagation(); toggleFullscreen(); showControls(); });
     if (quality) quality.addEventListener('click', (event) => { event.stopPropagation(); showMenu('quality'); showControls(); });
     speed.addEventListener('click', (event) => { event.stopPropagation(); showMenu('speed'); showControls(); });
-    if (subtitle) subtitle.addEventListener('click', (event) => { event.stopPropagation(); toggleSubtitle(); });
+    if (subtitle) subtitle.addEventListener('click', (event) => { event.stopPropagation(); showMenu('subtitle'); showControls(); });
     Object.entries(menus).forEach(([type, menu]) => {
       if (!menu) return;
       menu.addEventListener('click', (event) => {
@@ -443,6 +437,7 @@
         event.stopPropagation();
         if (type === 'quality') chooseQuality(item.dataset.option);
         if (type === 'speed') chooseSpeed(item.dataset.option);
+        if (type === 'subtitle') chooseSubtitle(item.dataset.option);
       });
     });
     progress.addEventListener('pointerdown', (event) => { event.stopPropagation(); showControls(); });
@@ -468,6 +463,7 @@
     if (subtitle) setChoice(subtitle, '字幕', state.currentSubtitle || subtitleOptions[0]);
     setActive(menus.quality, state.currentQuality);
     setActive(menus.speed, state.currentSpeed);
+    setActive(menus.subtitle, state.currentSubtitle);
     updateProgress();
     updatePlayButton();
     updateVolumeButton();

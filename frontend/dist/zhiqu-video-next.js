@@ -5,7 +5,7 @@
   // The generated Expo bundle already owns playback, HLS, subtitles and server progress.
   // This adapter only adds the series UI and delegates episode changes back to the
   // existing /content/[id] route so the original player lifecycle is reused.
-  const API_BASE_URL = 'http://localhost:8080';
+  const API_BASE_URL = String(globalThis.__ZHIQU_API_BASE_URL || '').replace(/\/+$/, '');
   const SESSION_KEY = 'zhiqu.auth.session.v1';
   const instances = new WeakMap();
   let activeInstance = null;
@@ -25,48 +25,13 @@
     }
   }
 
-  function userId() {
-    const session = readSession();
-    return String(session?.user?.id || session?.user?.username || 'anonymous');
-  }
-
-  function progressKey(contentId) {
-    return `zq:video-progress:${userId()}:${contentId}`;
-  }
-
-  function readProgress(contentId) {
-    try {
-      const raw = window.localStorage.getItem(progressKey(contentId));
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function writeProgress(video, contentId, completed = false) {
-    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
-    const position = Number.isFinite(video.currentTime) ? Math.max(0, video.currentTime) : 0;
-    const watchedPercent = duration ? Math.min(100, Math.round(position / duration * 100)) : 0;
-    const payload = {
-      lastPosition: Math.floor(position),
-      watchedPercent,
-      completed: Boolean(completed || (duration > 0 && position >= duration * 0.9)),
-      updatedAt: new Date().toISOString(),
-    };
-    try {
-      window.localStorage.setItem(progressKey(contentId), JSON.stringify(payload));
-    } catch {
-      // Storage can be unavailable in private browsing; the server adapter still works.
-    }
-    return payload;
-  }
-
   async function requestJson(path, options = {}) {
     const session = readSession();
     const headers = new Headers(options.headers || {});
     headers.set('Accept', 'application/json');
     if (session?.accessToken) headers.set('Authorization', `Bearer ${session.accessToken}`);
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const url = /^https?:\/\//i.test(path) ? path : `${API_BASE_URL}${path}` || path;
+    const response = await fetch(url, {
       ...options,
       headers,
       credentials: 'omit',
@@ -96,6 +61,7 @@
       linkedPracticeId: source.linkedPracticeId || fallback.linkedPracticeId || null,
       linkedGameId: source.linkedGameId || fallback.linkedGameId || null,
       nextActionUrl: source.nextActionUrl || source.practiceUrl || source.gameUrl || fallback.nextActionUrl || '',
+      learningStatus: source.learningStatus || fallback.learningStatus || 'NOT_STARTED',
     };
   }
 
@@ -126,10 +92,9 @@
   }
 
   function applyLearningStatus(episode) {
-    const progress = readProgress(episode.id);
     return {
       ...episode,
-      learningStatus: progress?.completed ? 'COMPLETED' : progress?.lastPosition > 0 ? 'IN_PROGRESS' : 'NOT_STARTED',
+      learningStatus: episode.learningStatus || 'NOT_STARTED',
     };
   }
 
@@ -448,20 +413,10 @@
       next: null,
       endReached: false,
       destroyed: false,
-      restored: false,
     };
     renderCatalog(catalogRoot, state);
     renderEndCard(state);
 
-    const save = (completed = false) => writeProgress(video, contentId, completed);
-    const onLoadedMetadata = () => {
-      if (state.restored) return;
-      state.restored = true;
-      const progress = readProgress(contentId);
-      if (progress?.lastPosition > 3 && (!Number.isFinite(video.currentTime) || video.currentTime < 1)) {
-        try { video.currentTime = Math.min(progress.lastPosition, Math.max(0, video.duration - 0.5)); } catch {}
-      }
-    };
     const onTimeUpdate = () => {
       const duration = Number.isFinite(video.duration) ? video.duration : 0;
       const ratio = duration > 0 ? video.currentTime / duration : 0;
@@ -474,7 +429,6 @@
     };
     const onEnded = () => {
       state.endReached = true;
-      save(true);
       renderEndCard(state);
       state.card.hidden = false;
     };
@@ -484,19 +438,10 @@
     const onSeeking = () => {
       if (video.currentTime < video.duration * 0.85) state.card.hidden = true;
     };
-    const onPause = () => save(false);
-    const onVisibility = () => { if (document.visibilityState !== 'visible') save(false); };
-    const onPageHide = () => save(false);
-    video.addEventListener('loadedmetadata', onLoadedMetadata);
     video.addEventListener('timeupdate', onTimeUpdate);
     video.addEventListener('ended', onEnded);
     video.addEventListener('play', onPlay);
     video.addEventListener('seeking', onSeeking);
-    video.addEventListener('pause', onPause);
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('pagehide', onPageHide);
-    const timer = window.setInterval(() => save(false), 5000);
-
     const hydrate = async () => {
       let content = null;
       try { content = await requestJson(`/api/contents/${encodeURIComponent(contentId)}`); } catch {}
@@ -522,15 +467,10 @@
         if (state.destroyed) return;
         state.destroyed = true;
         instances.delete(video);
-        window.clearInterval(timer);
-        video.removeEventListener('loadedmetadata', onLoadedMetadata);
         video.removeEventListener('timeupdate', onTimeUpdate);
         video.removeEventListener('ended', onEnded);
         video.removeEventListener('play', onPlay);
         video.removeEventListener('seeking', onSeeking);
-        video.removeEventListener('pause', onPause);
-        document.removeEventListener('visibilitychange', onVisibility);
-        window.removeEventListener('pagehide', onPageHide);
         root.remove();
       },
     };

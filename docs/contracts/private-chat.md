@@ -6,10 +6,9 @@
 
 - 所有接口都要求登录，未登录返回 `401 Unauthorized`。
 - 搜索结果不包含当前用户，只返回状态为 `ACTIVE` 的用户。
-- 私聊支持陌生人聊天请求：搜索到用户后可以先发送一条消息，不需要先知道或交换笔友码。
-- 陌生人首条消息会创建 `REQUESTED` 会话；发起者只能发送这一条初始消息，接收者可以接受或暂不接受。
-- 接收者接受后会话变为 `ACCEPTED`，双方可以正常收发消息；暂不接受后会话变为 `DECLINED`。
-- 已建立好友关系的双方直接创建 `ACCEPTED` 会话。好友申请仍通过现有 `/api/social/friend-requests/by-profile` 接口发起。
+- 搜索到的非好友用户只能发起好友申请，不能创建会话或发送消息。
+- 只有 `friendships.status = ACTIVE` 的双方可以创建 `ACCEPTED` 会话并收发消息。好友申请仍通过现有 `/api/social/friend-requests/by-profile` 接口发起。
+- 消息状态为 `UNKNOWN`、`PENDING_REVIEW`、`APPROVED` 或 `REJECTED`；客户端和服务端只展示 `APPROVED`。
 
 ## 接口
 
@@ -23,7 +22,7 @@
 
 `GET /api/chat/conversations`
 
-返回当前用户参与的会话，按最近更新时间倒序排列。每项包含对方信息、`lastMessage`、`lastAt`、`unreadCount`、`status`（`REQUESTED`、`ACCEPTED` 或 `DECLINED`）和 `requestedBy`。
+返回当前用户参与的好友会话，按最近更新时间倒序排列。每项包含对方信息、`lastMessage`、`lastAt`、`unreadCount` 和 `status`（固定为 `ACCEPTED`）。未知审核状态的消息不参与预览和未读计数。
 
 ### 消息列表
 
@@ -41,19 +40,15 @@
 {"body":"你好，很高兴认识你","requestId":"可选的请求幂等标识"}
 ```
 
-消息正文会去除首尾空白，长度必须为 1 到 2000 个字符。成功返回创建的消息。
+消息正文会去除首尾空白，长度必须为 1 到 500 个字符。手机号、QQ 号、微信号、邮箱和地址信息会被拦截。成功发送的文本消息状态为 `APPROVED`；其他状态不会展示。相同发送者的 `requestId` 会返回已有消息，避免重复发送。
 
-### 接受聊天请求
+### 聊天请求兼容接口
 
 `POST /api/chat/conversations/{partnerId}/accept`
 
-仅接收者可以接受 `REQUESTED` 会话。成功后会话状态变为 `ACCEPTED`。
-
-### 暂不接受聊天请求
-
 `POST /api/chat/conversations/{partnerId}/decline`
 
-仅接收者可以暂不接受 `REQUESTED` 会话。成功后会话状态变为 `DECLINED`，对方不能继续发送消息。
+历史 `/accept` 和 `/decline` 路由保留为兼容入口，但儿童版本禁止通过聊天请求建立关系，调用会返回 `403`。请使用好友申请接口。
 
 ### 标记已读
 
@@ -61,18 +56,6 @@
 
 将对方在该会话中发送的未读消息标记为已读，返回更新条数。
 
-### 自定义图片表情
+### 系统表情
 
-`GET /api/chat/stickers`
-
-返回当前账号收藏的图片表情键，按收藏时间倒序排列。
-
-`POST /api/chat/stickers`
-
-把已经通过 `POST /api/community/images` 上传的图片登记到当前账号的表情收藏中。
-
-```json
-{"key":"0123456789abcdef0123456789abcdef.png"}
-```
-
-图片表情消息使用内部正文标记 `[[zq-sticker:{key}]]`。客户端将该标记渲染为图片，并在会话预览中显示 `[图片表情]`。
+儿童版本仅提供内置 Unicode 表情。`GET /api/chat/stickers` 返回空列表，`POST /api/chat/stickers` 返回 `403`；数据库表保留以便未来扩展。

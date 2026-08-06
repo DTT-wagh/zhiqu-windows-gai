@@ -14,6 +14,7 @@ const stickerRequestClassPath = 'BOOT-INF/classes/com/zhiqu/server/chat/ChatStic
 const migrationPath = 'BOOT-INF/classes/db/migration/V38__create_private_chat.sql';
 const statusMigrationPath = 'BOOT-INF/classes/db/migration/V39__add_chat_request_status.sql';
 const stickerMigrationPath = 'BOOT-INF/classes/db/migration/V40__create_chat_stickers.sql';
+const safetyMigrationPath = 'BOOT-INF/classes/db/migration/V41__secure_private_chat_messages.sql';
 const tempRoot = fs.mkdtempSync(path.join(serverRoot, '.patch-private-chat-'));
 
 function run(command, args, cwd) {
@@ -104,6 +105,23 @@ CREATE TABLE chat_stickers (
 CREATE INDEX idx_chat_sticker_owner_created ON chat_stickers(owner_id, created_at);
 `, 'utf8');
 
+  const safetyMigrationFile = path.join(tempRoot, safetyMigrationPath);
+  fs.mkdirSync(path.dirname(safetyMigrationFile), { recursive: true });
+  fs.writeFileSync(safetyMigrationFile, `
+ALTER TABLE chat_messages
+  ADD COLUMN request_id VARCHAR(36);
+
+ALTER TABLE chat_messages
+  ADD COLUMN status VARCHAR(24) DEFAULT 'UNKNOWN' NOT NULL;
+
+ALTER TABLE chat_messages
+  ADD CONSTRAINT chk_chat_message_status
+  CHECK (status IN ('UNKNOWN', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'));
+
+CREATE UNIQUE INDEX uk_chat_message_request_id ON chat_messages(request_id);
+CREATE INDEX idx_chat_message_review_status ON chat_messages(conversation_id, status, created_at);
+`, 'utf8');
+
   run('jar', [
     'uf', jarPath,
     '-C', tempRoot, classPath,
@@ -113,6 +131,7 @@ CREATE INDEX idx_chat_sticker_owner_created ON chat_stickers(owner_id, created_a
     '-C', tempRoot, migrationPath,
     '-C', tempRoot, statusMigrationPath,
     '-C', tempRoot, stickerMigrationPath,
+    '-C', tempRoot, safetyMigrationPath,
   ], projectRoot);
   console.log('Private chat endpoints and schema added to the generated server jar.');
 } finally {

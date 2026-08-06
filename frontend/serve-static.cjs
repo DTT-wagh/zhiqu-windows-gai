@@ -34,6 +34,8 @@ const socialChatScript = '<script src="/zhiqu-social-chat.js"></script>';
 const videoControlsScript = '<script src="/zhiqu-video-controls.js"></script>';
 const videoNextScript = '<script src="/zhiqu-video-next.js"></script>';
 const recommendationsScript = '<script src="/zhiqu-recommendations.js"></script>';
+const apiBaseUrl = String(process.env.ZHIQU_API_BASE_URL || '').trim().replace(/\/+$/, '');
+const apiConfigScript = `<script>globalThis.__ZHIQU_API_BASE_URL=${JSON.stringify(apiBaseUrl).replace(/</g, '\\u003c')};</script>`;
 const askThemeToggleSource = 'function(e){oe(()=>{s(e),B(""),Q([])})';
 const askThemeTogglePatched = 'function(e){oe(()=>{s(n===e?"":e),B(""),Q([])})';
 const askBodyValidationSource = 'P.trim().length<=1e3';
@@ -116,7 +118,7 @@ const server = http.createServer((request, response) => {
       body = Buffer.from(source);
     }
     if (path.extname(file).toLowerCase() === '.html') {
-      const scripts = [avatarPreviewScript, birthdayWheelScript, profileEditFeedbackScript, gamesPlaceholderScript, askBodyScript, askNavigationScript, answerComposerScript, keyboardAvoidanceScript, friendsNavigationScript, friendsAuthGuardScript, socialChatScript, videoControlsScript, videoNextScript];
+      const scripts = [apiConfigScript, avatarPreviewScript, birthdayWheelScript, profileEditFeedbackScript, gamesPlaceholderScript, askBodyScript, askNavigationScript, answerComposerScript, keyboardAvoidanceScript, friendsNavigationScript, friendsAuthGuardScript, socialChatScript, videoControlsScript, videoNextScript];
       let html = body.toString('utf8');
       if (!html.includes('src="/zhiqu-recommendations.js"')) html = html.replace('</head>', `${recommendationsScript}</head>`);
       body = Buffer.from(html.replace('</body>', `${scripts.join('')}</body>`));

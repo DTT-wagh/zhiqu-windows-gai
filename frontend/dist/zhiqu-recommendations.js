@@ -98,8 +98,9 @@
     return typeof value === 'string' && /^(https?:\/\/|\/)/.test(value) && !value.includes('cdn.example/');
   }
 
-  function status(value, fallback) {
-    return String(value || fallback).toUpperCase();
+  function status(value, fallback = 'UNKNOWN') {
+    if (value === null || value === undefined || String(value).trim() === '') return fallback;
+    return String(value).toUpperCase();
   }
 
   function normalize(value, fallback = {}) {
@@ -122,9 +123,9 @@
       coverUrl: source.coverUrl || source.poster || source.thumbnail || source.imageUrl || fallback.coverUrl || '',
       summary: String(source.summary || source.description || source.aiSummary || source.learningGoal || fallback.summary || ''),
       status: status(source.status || source.publishStatus || fallback.status, 'PUBLISHED'),
-      reviewStatus: status(source.reviewStatus || source.moderationStatus || fallback.reviewStatus, 'APPROVED'),
-      safetyStatus: status(source.safetyStatus || source.childSafetyStatus || fallback.safetyStatus, 'SAFE'),
-      childSafe: source.childSafe !== false && source.forChildren !== false && fallback.childSafe !== false,
+      reviewStatus: status(source.reviewStatus ?? source.moderationStatus ?? fallback.reviewStatus, 'UNKNOWN'),
+      safetyStatus: status(source.safetyStatus ?? source.childSafetyStatus ?? fallback.safetyStatus, 'UNKNOWN'),
+      childSafe: (source.childSafe ?? source.forChildren ?? fallback.childSafe ?? fallback.forChildren) === true,
       containsAdvertising: Boolean(source.containsAdvertising || source.advertising || source.isAd || fallback.containsAdvertising),
       containsDangerousInstruction: Boolean(source.containsDangerousInstruction || source.dangerous || source.riskLevel === 'HIGH' || fallback.containsDangerousInstruction),
       externalOnly: Boolean(source.externalOnly || source.externalUrlOnly || source.externalLinkOnly || fallback.externalOnly),
@@ -148,7 +149,7 @@
   function approved(candidate) {
     const reviewed = ['APPROVED', 'PASSED', 'PASS', 'VERIFIED', 'PUBLISHED', 'ACTIVE', 'COMPLETED'];
     const safe = ['SAFE', 'APPROVED', 'PASSED', 'PASS', 'VERIFIED', 'PUBLISHED', 'ACTIVE', 'COMPLETED'];
-    return candidate.childSafe && reviewed.includes(candidate.reviewStatus) && safe.includes(candidate.safetyStatus)
+    return candidate.childSafe === true && reviewed.includes(candidate.reviewStatus) && safe.includes(candidate.safetyStatus)
       && !candidate.containsAdvertising && !candidate.containsDangerousInstruction && !candidate.externalOnly;
   }
 

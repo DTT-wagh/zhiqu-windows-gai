@@ -2,10 +2,7 @@
   const ROOT_ID = 'zhiqu-social-chat-root';
   const STYLE_ID = 'zhiqu-social-chat-styles';
   const SESSION_KEY = 'zhiqu.auth.session.v1';
-  const STICKER_STORAGE_PREFIX = 'zhiqu.chat.stickers.v1.';
-  const API_BASE = 'http://localhost:8080';
-  const MAX_STICKER_BYTES = 3 * 1024 * 1024;
-  const STICKER_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+  const API_BASE = String(globalThis.__ZHIQU_API_BASE_URL || '').replace(/\/+$/, '');
   const EMOJIS = [
     '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣',
     '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰',
@@ -30,17 +27,13 @@
     friends: [],
     conversations: [],
     activePartner: null,
-    activeMode: 'private',
+    activeMode: 'chat',
     messages: [],
     enteringMessageId: null,
     composerDraft: '',
     composerPartnerId: null,
     composerSelection: null,
     composerPanel: null,
-    emojiSection: 'unicode',
-    stickers: [],
-    pickingSticker: false,
-    uploadingSticker: false,
     loading: false,
     error: '',
     pollTimer: null,
@@ -114,30 +107,6 @@
     return response.json();
   }
 
-  async function apiForm(path, formData, retryAfterRefresh = true) {
-    const currentSession = session();
-    if (!currentSession?.accessToken) throw new Error('请先登录后上传表情');
-    const response = await fetch(`${API_BASE}${path}`, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${currentSession.accessToken}`,
-      },
-      body: formData,
-    });
-    if (response.status === 401 && retryAfterRefresh) {
-      const nextSession = await refreshSession(currentSession);
-      if (nextSession?.accessToken) return apiForm(path, formData, false);
-      throw new Error('登录已过期，请重新登录后上传表情');
-    }
-    if (!response.ok) {
-      let payload = null;
-      try { payload = await response.clone().json(); } catch {}
-      throw new Error(payload?.message || '图片上传失败，请稍后重试');
-    }
-    return response.json();
-  }
-
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -153,57 +122,6 @@
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
     return date.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
-  }
-
-  function stickerStorageKey() {
-    const userId = currentUserId();
-    return userId ? `${STICKER_STORAGE_PREFIX}${userId}` : '';
-  }
-
-  function validStickerKey(key) {
-    return /^[0-9a-f]{32}\.(?:jpg|jpeg|png|gif|webp)$/i.test(String(key || ''));
-  }
-
-  function stickerKeyFromUrl(url) {
-    try {
-      const parsed = new URL(url, API_BASE);
-      if (parsed.origin !== new URL(API_BASE).origin) return '';
-      const match = parsed.pathname.match(/^\/api\/community\/images\/([^/]+)$/);
-      const key = match ? decodeURIComponent(match[1]) : '';
-      return validStickerKey(key) ? key : '';
-    } catch {
-      return '';
-    }
-  }
-
-  function stickerKeyFromBody(body) {
-    const match = String(body || '').match(/^\[\[zq-sticker:([^\]]+)\]\]$/);
-    return match && validStickerKey(match[1]) ? match[1] : '';
-  }
-
-  function stickerUrl(key) {
-    return `${API_BASE}/api/community/images/${encodeURIComponent(key)}`;
-  }
-
-  function loadStoredStickers() {
-    const key = stickerStorageKey();
-    if (!key) return [];
-    try {
-      const items = JSON.parse(localStorage.getItem(key) || '[]');
-      if (!Array.isArray(items)) return [];
-      return items
-        .filter((item) => validStickerKey(item?.key))
-        .slice(0, 60)
-        .map((item) => ({ key: item.key, createdAt: item.createdAt || '' }));
-    } catch {
-      return [];
-    }
-  }
-
-  function saveStoredStickers() {
-    const key = stickerStorageKey();
-    if (!key) return;
-    localStorage.setItem(key, JSON.stringify(state.stickers.slice(0, 60)));
   }
 
   function installStyles() {
@@ -369,7 +287,6 @@
     root.dataset.zqSocialChat = 'true';
     document.body.appendChild(root);
     root.addEventListener('click', handleClick);
-    root.addEventListener('change', handleChange);
     root.addEventListener('input', handleInput);
     root.addEventListener('focusin', handleFocusIn);
     root.addEventListener('keydown', handleKeydown);
@@ -405,8 +322,8 @@
     root.querySelector('.zq-social-backdrop')?.remove();
     if (!state.open) return;
     const active = state.activePartner;
-    const panelTitle = active && state.activeMode === 'chat' ? '聊天' : '私聊';
-    const panelSubtitle = active && state.activeMode === 'chat' ? '和笔友继续交流学习' : '先聊聊，再决定是否成为笔友';
+    const panelTitle = active ? '聊天' : '私聊';
+    const panelSubtitle = active ? '和笔友继续交流学习' : '先添加笔友，成为好友后即可聊天';
     const panel = document.createElement('div');
     panel.className = `zq-social-backdrop ${active ? 'zq-social-chat-backdrop' : ''}`;
     panel.innerHTML = `
@@ -459,12 +376,9 @@
               || friend.student?.id === item.id
               || (item.publicProfileId && friend.student?.publicProfileId === item.publicProfileId));
             const isPending = !isFriend && item.pending;
-            const chatAction = isFriend ? 'open-result-chat' : 'send-result-chat';
-            const chatLabel = isFriend ? '聊天' : '私聊';
-            const addButton = isFriend
-              ? ''
-              : `<button type="button" class="zq-social-result-action secondary" ${isPending ? 'disabled' : ''} data-action="${isPending ? '' : 'add-result'}" data-user-id="${escapeHtml(item.id)}" data-profile-id="${escapeHtml(item.publicProfileId || '')}">${isPending ? '已发送' : '加好友'}</button>`;
-            return `<div class="zq-social-result">${avatar(item.nickname, item.avatarKey)}<div class="zq-social-row-copy"><div class="zq-social-row-name">${escapeHtml(item.nickname)}</div><div class="zq-social-row-preview">@${escapeHtml(item.username)}</div></div><div class="zq-social-result-actions"><button type="button" class="zq-social-result-action" data-action="${chatAction}" data-user-id="${escapeHtml(item.id)}" data-profile-id="${escapeHtml(item.publicProfileId || '')}">${chatLabel}</button>${addButton}</div></div>`;
+            const action = isFriend ? 'open-result-chat' : (isPending ? '' : 'add-result');
+            const label = isFriend ? '聊天' : (isPending ? '已发送' : '加好友');
+            return `<div class="zq-social-result">${avatar(item.nickname, item.avatarKey)}<div class="zq-social-row-copy"><div class="zq-social-row-name">${escapeHtml(item.nickname)}</div><div class="zq-social-row-preview">@${escapeHtml(item.username)}</div></div><div class="zq-social-result-actions"><button type="button" class="zq-social-result-action" ${isPending ? 'disabled' : ''} data-action="${action}" data-user-id="${escapeHtml(item.id)}" data-profile-id="${escapeHtml(item.publicProfileId || '')}">${label}</button></div></div>`;
           }).join('')
           : '<div class="zq-social-empty">没有找到匹配的同学。检查账号或昵称后再试。</div>';
     return `<div class="zq-social-search-box"><input data-chat-search placeholder="搜索账号或昵称" value="${escapeHtml(state.searchQuery)}" autocomplete="off" /></div><div class="zq-social-list">${results}</div>`;
@@ -478,11 +392,6 @@
   }
 
   function conversationPreview(item) {
-    if (item.status === 'REQUESTED') {
-      return item.requestedBy === currentUserId() ? '聊天请求已发送' : '对方请求与你聊天';
-    }
-    if (item.status === 'DECLINED') return '对方暂时无法接收消息';
-    if (stickerKeyFromBody(item.lastMessage)) return '[图片表情]';
     return item.lastMessage || '开始一段新的交流';
   }
 
@@ -491,9 +400,7 @@
   }
 
   function renderEmojiPanel() {
-    const content = state.emojiSection === 'unicode'
-      ? `<div class="zq-social-unicode-grid">${EMOJIS.map((emoji) => `<button type="button" class="zq-social-emoji-button" data-action="insert-emoji" data-emoji="${escapeHtml(emoji)}" aria-label="插入表情 ${escapeHtml(emoji)}">${escapeHtml(emoji)}</button>`).join('')}</div>`
-      : renderStickerCollection();
+    const content = `<div class="zq-social-unicode-grid">${EMOJIS.map((emoji) => `<button type="button" class="zq-social-emoji-button" data-action="insert-emoji" data-emoji="${escapeHtml(emoji)}" aria-label="插入表情 ${escapeHtml(emoji)}">${escapeHtml(emoji)}</button>`).join('')}</div>`;
     return `<div class="zq-social-tool-panel zq-social-emoji-panel" role="region" aria-label="表情"><div class="zq-social-emoji-content">${content}</div></div>`;
   }
 
@@ -502,64 +409,28 @@
   }
 
   function renderComposerTools() {
-    if (state.composerPanel !== 'emoji') return '';
-    const unicodeSelected = state.emojiSection === 'unicode';
-    return `<div class="zq-social-composer-tools" role="toolbar" aria-label="表情分类"><div class="zq-social-emoji-category-tabs" role="tablist" aria-label="表情分类"><button type="button" class="zq-social-emoji-category-tab" data-action="select-emoji-section" data-section="unicode" role="tab" aria-label="常用表情" aria-selected="${unicodeSelected}">☺</button><button type="button" class="zq-social-emoji-category-tab" data-action="select-emoji-section" data-section="stickers" role="tab" aria-label="我的图片表情" aria-selected="${!unicodeSelected}">♡</button></div></div>`;
-  }
-
-  function renderStickerCollection() {
-    const addTile = `<button type="button" class="zq-social-sticker-add" data-action="choose-sticker" aria-label="添加图片表情" ${state.uploadingSticker ? 'disabled' : ''}>${state.uploadingSticker ? '…' : '+'}</button><input type="file" data-sticker-upload accept="image/jpeg,image/png,image/gif,image/webp" hidden tabindex="-1" aria-hidden="true" />`;
-    const stickers = state.stickers.length
-      ? state.stickers.map((sticker) => `<button type="button" class="zq-social-sticker-tile" data-action="send-sticker" data-sticker-key="${escapeHtml(sticker.key)}" aria-label="发送图片表情"><img src="${stickerUrl(sticker.key)}" alt="" loading="lazy" /></button>`).join('')
-      : '<div class="zq-social-sticker-empty">还没有收藏的图片表情</div>';
-    return `<div class="zq-social-sticker-grid">${addTile}${stickers}</div>`;
+    return '';
   }
 
   function renderMessages(partner) {
-    const conversation = state.conversations.find((item) => item.partnerId === partner.id);
-    const status = conversation?.status || partner.status || '';
-    const requestedBy = conversation?.requestedBy || partner.requestedBy || '';
-    const isRequester = requestedBy === currentUserId();
-    const privateChat = state.activeMode === 'private';
-    const sentCount = privateChat
-      ? state.messages.filter((message) => message.senderId === currentUserId()).length
-      : 0;
-    const remainingMessages = Math.max(0, 3 - sentCount);
-    const messages = state.messages.length
-      ? state.messages.map((message) => {
-        const stickerKey = stickerKeyFromBody(message.body);
+    const visibleMessages = state.messages.filter((message) => message?.status === 'APPROVED');
+    const messages = visibleMessages.length
+      ? visibleMessages.map((message) => {
         const entering = state.enteringMessageId && message.id === state.enteringMessageId;
-        const content = stickerKey
-          ? `<div class="zq-social-sticker-message"><img src="${stickerUrl(stickerKey)}" alt="图片表情" loading="lazy" /></div>`
-          : `<div class="zq-social-bubble">${escapeHtml(message.body)}</div>`;
+        const content = `<div class="zq-social-bubble">${escapeHtml(message.body)}</div>`;
         return `<div class="zq-social-message ${message.senderId === currentUserId() ? 'mine' : ''} ${entering ? 'zq-social-message-enter' : ''}">${content}<span class="zq-social-message-time">${escapeHtml(formatTime(message.createdAt))}</span></div>`;
       }).join('')
       : '<div class="zq-social-placeholder">还没有消息，向这位笔友问个好吧。</div>';
-    let requestBanner = '';
     const draft = state.composerPartnerId === partner.id ? state.composerDraft : '';
     const toolPanel = state.composerPanel === 'emoji'
       ? renderEmojiPanel()
       : state.composerPanel === 'more'
         ? '<div class="zq-social-tool-panel zq-social-more-panel" role="region" aria-label="更多功能"></div>'
         : '';
-    let composer = `<form class="zq-social-composer" data-chat-form data-has-content="${draft.trim() ? 'true' : 'false'}"><div class="zq-social-composer-row"><input data-chat-composer maxlength="2000" placeholder="写下想说的话" autocomplete="off" value="${escapeHtml(draft)}" />${renderComposerActions()}</div>${renderComposerTools()}${toolPanel}</form>`;
-    const privateLimitNote = privateChat && remainingMessages > 0 && !(status === 'REQUESTED' && !isRequester)
-      ? `<div class="zq-social-request-note">陌生人私聊还可发送 ${remainingMessages} 条消息，成为笔友后可继续畅聊。</div>`
-      : '';
-    if (status === 'REQUESTED' && isRequester) {
-      requestBanner = '<div class="zq-social-request-note">已发送聊天请求，等待对方接受后即可继续交流。</div>';
-      if (remainingMessages === 0) composer = '<div class="zq-social-request-note">已达到陌生人私聊 3 条消息上限，请先添加笔友。</div>';
-    } else if (status === 'REQUESTED') {
-      requestBanner = `<div class="zq-social-request-banner"><strong>对方想和你聊天</strong><span>接受后即可回复消息，也可以暂不接受。</span><div class="zq-social-request-actions"><button type="button" data-action="accept-conversation" data-user-id="${escapeHtml(partner.id)}">接受</button><button type="button" class="secondary" data-action="decline-conversation" data-user-id="${escapeHtml(partner.id)}">暂不接受</button></div></div>`;
-      composer = '<div class="zq-social-request-note">接受聊天请求后才能回复。</div>';
-    } else if (status === 'DECLINED') {
-      requestBanner = '<div class="zq-social-request-note">对方暂时无法接收消息。</div>';
-      composer = '';
-    }
-    if (privateChat && remainingMessages === 0 && status !== 'DECLINED' && !(status === 'REQUESTED' && !isRequester)) {
-      composer = '<div class="zq-social-request-note">已达到陌生人私聊 3 条消息上限，请先添加笔友。</div>';
-    }
-    return `${requestBanner}${privateLimitNote}<div class="zq-social-message-list">${messages}</div>${composer}`;
+    const composer = isFriendPartner(partner)
+      ? `<form class="zq-social-composer" data-chat-form data-has-content="${draft.trim() ? 'true' : 'false'}"><div class="zq-social-composer-row"><input data-chat-composer maxlength="500" placeholder="写下想说的话" autocomplete="off" value="${escapeHtml(draft)}" />${renderComposerActions()}</div>${renderComposerTools()}${toolPanel}</form>`
+      : '<div class="zq-social-request-note">双方成为好友后才能聊天</div>';
+    return `<div class="zq-social-message-list">${messages}</div>${composer}`;
   }
 
   function isFriendPartner(partner) {
@@ -588,21 +459,15 @@
 
   async function loadOverview() {
     try {
-      state.stickers = loadStoredStickers();
-      const [friends, conversations, stickers] = await Promise.all([
+      const [friends, conversations] = await Promise.all([
         api('/api/social/friends'),
         api('/api/chat/conversations'),
-        api('/api/chat/stickers').catch(() => state.stickers),
       ]);
       state.friends = friends || [];
       state.conversations = conversations || [];
-      state.stickers = Array.isArray(stickers) ? stickers.filter((item) => validStickerKey(item?.key)).slice(0, 60) : state.stickers;
-      saveStoredStickers();
       const root = ensureRoot();
-      if (!state.pickingSticker) {
-        renderLauncher(root);
-        if (state.open) renderPanel(root);
-      }
+      renderLauncher(root);
+      if (state.open) renderPanel(root);
     } catch (error) {
       if (state.open) showError(error.message);
     }
@@ -633,11 +498,11 @@
   }
 
   async function openConversation(partner, mode) {
-    const nextMode = mode === 'chat' || mode === 'private'
-      ? mode
-      : (partner.mode === 'chat' || partner.mode === 'private'
-        ? partner.mode
-        : (isFriendPartner(partner) ? 'chat' : 'private'));
+    if (!isFriendPartner(partner)) {
+      showError('双方成为好友后才能聊天');
+      return;
+    }
+    const nextMode = 'chat';
     if (state.activePartner?.id !== partner.id) {
       state.composerDraft = '';
       state.composerPartnerId = partner.id;
@@ -664,25 +529,6 @@
     }
   }
 
-  async function updateConversationRequest(partnerId, action) {
-    const button = Array.from(document.querySelectorAll(`[data-action="${action}-conversation"]`))
-      .find((candidate) => candidate.dataset.userId === partnerId);
-    if (button) button.disabled = true;
-    try {
-      await api(`/api/chat/conversations/${encodeURIComponent(partnerId)}/${action}`, { method: 'POST', body: '{}' });
-      state.conversations = await api('/api/chat/conversations') || state.conversations;
-      if (state.activePartner?.id === partnerId) {
-        state.messages = await api(`/api/chat/conversations/${encodeURIComponent(partnerId)}/messages`) || state.messages;
-        state.activePartner = { ...state.activePartner, status: action === 'accept' ? 'ACCEPTED' : 'DECLINED' };
-      }
-      renderLauncher(ensureRoot());
-      renderPanel(ensureRoot());
-    } catch (error) {
-      showError(error.message);
-      if (button) button.disabled = false;
-    }
-  }
-
   async function addFriend(item) {
     if (!item.publicProfileId) return showError('该账号暂时无法发起好友申请');
     try {
@@ -698,42 +544,6 @@
     }
   }
 
-  async function uploadSticker(file) {
-    if (!(file instanceof File)) return;
-    if (!STICKER_TYPES.has(file.type)) {
-      showError('仅支持 JPG、PNG、GIF、WebP 图片');
-      return;
-    }
-    if (file.size > MAX_STICKER_BYTES) {
-      showError('图片表情不能超过 3MB');
-      return;
-    }
-    state.uploadingSticker = true;
-    state.error = '';
-    renderPanel(ensureRoot());
-    try {
-      const formData = new FormData();
-      formData.append('image', file, file.name || 'sticker');
-      const result = await apiForm('/api/community/images', formData);
-      const key = stickerKeyFromUrl(result?.url);
-      if (!key) throw new Error('图片上传成功，但返回地址无效');
-      await api('/api/chat/stickers', {
-        method: 'POST',
-        body: JSON.stringify({ key }),
-      });
-      state.stickers = [
-        { key, createdAt: new Date().toISOString() },
-        ...state.stickers.filter((item) => item.key !== key),
-      ].slice(0, 60);
-      saveStoredStickers();
-    } catch (error) {
-      showError(error.message);
-    } finally {
-      state.uploadingSticker = false;
-      if (state.open) renderPanel(ensureRoot());
-    }
-  }
-
   async function sendMessage(form) {
     if (!state.activePartner) return;
     const input = form.querySelector('[data-chat-composer]');
@@ -743,20 +553,15 @@
     await sendMessageBody(body, { pendingButton: submit, clearDraft: true });
   }
 
-  async function sendSticker(key, button) {
-    if (!validStickerKey(key) || !state.stickers.some((item) => item.key === key)) return;
-    await sendMessageBody(`[[zq-sticker:${key}]]`, { pendingButton: button, clearDraft: false });
-  }
-
   async function sendMessageBody(body, options = {}) {
     if (!state.activePartner || !body) return;
-    if (state.activeMode === 'private') {
-      const sentCount = state.messages.filter((message) => message.senderId === currentUserId()).length;
-      if (sentCount >= 3) {
-        showError('陌生人私聊最多发送 3 条消息，请先添加笔友');
-        renderPanel(ensureRoot());
-        return;
-      }
+    if (!isFriendPartner(state.activePartner)) {
+      showError('双方成为好友后才能聊天');
+      return;
+    }
+    if (Array.from(body).length > 500) {
+      showError('消息需为 1-500 个字符');
+      return;
     }
     const pendingButton = options.pendingButton;
     if (pendingButton) pendingButton.disabled = true;
@@ -795,10 +600,8 @@
       try {
         state.conversations = await api('/api/chat/conversations') || state.conversations;
         if (state.activePartner) state.messages = await api(`/api/chat/conversations/${encodeURIComponent(state.activePartner.id)}/messages`) || state.messages;
-        if (!state.pickingSticker) {
-          renderLauncher(ensureRoot());
-          renderPanel(ensureRoot());
-        }
+        renderLauncher(ensureRoot());
+        renderPanel(ensureRoot());
       } catch {}
     }, 7000);
     loadOverview();
@@ -834,7 +637,6 @@
     state.open = false;
     state.searchMode = false;
     state.composerPanel = null;
-    state.pickingSticker = false;
     window.clearInterval(state.pollTimer);
     state.pollTimer = null;
     document.getElementById(ROOT_ID)?.querySelector('.zq-social-backdrop')?.remove();
@@ -850,7 +652,7 @@
     if (action === 'close') return closePanel();
     if (action === 'back-to-conversations') {
       state.activePartner = null;
-      state.activeMode = 'private';
+      state.activeMode = 'chat';
       state.messages = [];
       state.error = '';
       state.searchMode = false;
@@ -871,13 +673,13 @@
       if (!item) return;
       if (state.activePartner?.id === item.partnerId) {
         state.activePartner = null;
-        state.activeMode = 'private';
+        state.activeMode = 'chat';
         state.messages = [];
         state.error = '';
         state.composerPanel = null;
         return renderPanel(ensureRoot());
       }
-      return openConversation({ id: item.partnerId, username: item.username, nickname: item.nickname, avatarKey: item.avatarKey, status: item.status, requestedBy: item.requestedBy, isFriend: item.isFriend }, item.isFriend ? 'chat' : 'private');
+      return openConversation({ id: item.partnerId, username: item.username, nickname: item.nickname, avatarKey: item.avatarKey, status: item.status, requestedBy: item.requestedBy, isFriend: item.isFriend }, 'chat');
     }
     if (action === 'add-result') {
       const item = state.searchResults.find((candidate) => candidate.id === target.dataset.userId);
@@ -888,38 +690,11 @@
       if (item) return openConversation({ id: item.id, username: item.username || '', nickname: item.nickname || '', avatarKey: item.avatarKey, isFriend: true }, 'chat');
       showError('请重新搜索后再开始聊天');
     }
-    if (action === 'send-result-chat') {
-      const item = state.searchResults.find((candidate) => candidate.id === target.dataset.userId);
-      if (item) return openConversation({ id: item.id, username: item.username || '', nickname: item.nickname || '', avatarKey: item.avatarKey }, 'private');
-      showError('请重新搜索后再开始私聊');
-    }
-    if (action === 'accept-conversation') return updateConversationRequest(target.dataset.userId, 'accept');
-    if (action === 'decline-conversation') return updateConversationRequest(target.dataset.userId, 'decline');
     if (action === 'toggle-emoji' || action === 'toggle-more') {
       if (!state.composerPanel) captureComposerDraft();
       const nextPanel = action === 'toggle-emoji' ? 'emoji' : 'more';
       state.composerPanel = state.composerPanel === nextPanel ? null : nextPanel;
       return renderPanel(ensureRoot());
-    }
-    if (action === 'select-emoji-section') {
-      const section = target.dataset.section;
-      if (section !== 'unicode' && section !== 'stickers') return;
-      state.emojiSection = section;
-      state.composerPanel = 'emoji';
-      return renderPanel(ensureRoot());
-    }
-    if (action === 'choose-sticker') {
-      const input = target.closest('[data-chat-form]')?.querySelector('[data-sticker-upload]');
-      if (!(input instanceof HTMLInputElement)) return;
-      state.pickingSticker = true;
-      window.addEventListener('focus', () => {
-        window.setTimeout(() => { state.pickingSticker = false; }, 0);
-      }, { once: true });
-      input.click();
-      return;
-    }
-    if (action === 'send-sticker') {
-      return sendSticker(target.dataset.stickerKey || '', target);
     }
     if (action === 'insert-emoji') {
       insertEmoji(target.dataset.emoji || '');
@@ -943,7 +718,7 @@
     const draft = state.composerPartnerId === state.activePartner.id ? state.composerDraft : '';
     const start = Math.min(state.composerSelection?.start ?? draft.length, draft.length);
     const end = Math.min(state.composerSelection?.end ?? start, draft.length);
-    const nextDraft = `${draft.slice(0, start)}${emoji}${draft.slice(end)}`.slice(0, 2000);
+    const nextDraft = Array.from(`${draft.slice(0, start)}${emoji}${draft.slice(end)}`).slice(0, 500).join('');
     const nextPosition = Math.min(start + emoji.length, nextDraft.length);
     state.composerDraft = nextDraft;
     state.composerPartnerId = state.activePartner.id;
@@ -966,15 +741,6 @@
     state.searchQuery = input.value;
     window.clearTimeout(state.searchTimer);
     state.searchTimer = window.setTimeout(() => searchUsers(state.searchQuery), 260);
-  }
-
-  function handleChange(event) {
-    const input = event.target;
-    if (!(input instanceof HTMLInputElement) || !input.matches('[data-sticker-upload]')) return;
-    const file = input.files?.[0];
-    input.value = '';
-    state.pickingSticker = false;
-    if (file) uploadSticker(file);
   }
 
   function handleFocusIn(event) {
