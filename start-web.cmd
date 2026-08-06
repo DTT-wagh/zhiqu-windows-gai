@@ -10,5 +10,5 @@ if errorlevel 1 (
 )
 
 echo Starting Zhiqu web demo at http://localhost:8082 ...
-npx --yes serve dist -l 8082 --single
+node serve-static.cjs
 pause

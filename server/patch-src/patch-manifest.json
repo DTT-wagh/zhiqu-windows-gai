@@ -8,5 +8,10 @@
     "community-answer-image-upload",
     "magic-image-api"
   ],
-  "patches": []
+  "patches": [
+    {
+      "name": "private-chat",
+      "script": "server/patch-src/patch-private-chat.cjs"
+    }
+  ]
 }

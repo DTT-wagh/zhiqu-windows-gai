@@ -27,6 +27,13 @@ const profileEditFeedbackScript = '<script src="/zhiqu-profile-edit-feedback.js"
 const askBodyScript = '<script src="/zhiqu-ask-body.js"></script>';
 const askNavigationScript = '<script src="/zhiqu-ask-navigation.js"></script>';
 const answerComposerScript = '<script src="/zhiqu-answer-composer.js"></script>';
+const keyboardAvoidanceScript = '<script src="/zhiqu-keyboard-avoidance.js"></script>';
+const friendsNavigationScript = '<script src="/zhiqu-friends-navigation.js"></script>';
+const friendsAuthGuardScript = '<script src="/zhiqu-friends-auth-guard.js"></script>';
+const socialChatScript = '<script src="/zhiqu-social-chat.js"></script>';
+const videoControlsScript = '<script src="/zhiqu-video-controls.js"></script>';
+const videoNextScript = '<script src="/zhiqu-video-next.js"></script>';
+const recommendationsScript = '<script src="/zhiqu-recommendations.js"></script>';
 const askThemeToggleSource = 'function(e){oe(()=>{s(e),B(""),Q([])})';
 const askThemeTogglePatched = 'function(e){oe(()=>{s(n===e?"":e),B(""),Q([])})';
 const askBodyValidationSource = 'P.trim().length<=1e3';
@@ -45,6 +52,26 @@ const answerSuccessSource = 'const ie=(0,n.useMutation)({mutationFn:re,onSuccess
 const answerSuccessPatched = 'const ie=(0,n.useMutation)({mutationFn:re,onSuccess:()=>{T(""),globalThis.__zqAnswerSubmitSuccess?.(),be()}})';
 const answerDisabledSource = 'disabled:!R.trim(),loading:ie.isPending,onPress:()=>ie.mutate()';
 const answerDisabledPatched = 'disabled:!R.trim()&&!globalThis.__zqHasAnswerImages?.(),loading:ie.isPending,onPress:()=>ie.mutate()';
+const logoutSource = "_e.logout=async function(){const e=l?.refreshToken;if(e)try{await T('/api/auth/logout',{method:'POST',body:{refreshToken:e},auth:'none'})}finally{await h(null)}else await h(null)}";
+const logoutPatched = "_e.logout=async function(){const e=l?.refreshToken;await h(null);if(e){T('/api/auth/logout',{method:'POST',body:{refreshToken:e},auth:'none'}).catch(()=>{})}}";
+const settingsLogoutSource = "async function J(){if(!o){n(!0);try{await e(),t.router.replace('/login')}finally{n(!1)}}}";
+const settingsLogoutPatched = "async function J(){if(!o){n(!0);try{const logoutPromise=e();t.router.replace('/login');await logoutPromise}finally{n(!1)}}}";
+const settingsBackSource = 'accessibilityLabel:"\\u8fd4\\u56de\\u6211\\u7684",accessibilityRole:"button",onPress:()=>t.router.back()';
+const settingsBackPatched = 'accessibilityLabel:"\\u8fd4\\u56de\\u6211\\u7684",accessibilityRole:"button",onPress:()=>{const e=t.router.canGoBack?.();e?t.router.back():t.router.replace("/")}';
+const friendsImportSource = 'q=r(_d[31]);function w()';
+const friendsImportPatched = 'q=r(_d[31]),AvatarKit=r(_d[32]),ChatIcon=e(r(_d[33])),SearchIcon=e(r(_d[34]));function w()';
+const friendsDependencySource = '},1485,[1578,1181,1461,81,1251,1469,1276,1473,1246,1177,1457,1474,1475,810,1256,39,166,291,29,298,100,245,173,1249,1238,1146,1179,1230,1270,1266,1180,2]);';
+const friendsDependencyPatched = '},1485,[1578,1181,1461,81,1251,1469,1276,1473,1246,1177,1457,1474,1475,810,1256,39,166,291,29,298,100,245,173,1249,1238,1146,1179,1230,1270,1266,1180,2,1257,809,1237]);';
+const friendAvatarSource = 'S=(0,q.jsx)(E.default,{style:ee.avatar,children:(0,q.jsx)(x.default,{size:21,color:B.JournalColors.indigo})})';
+const friendAvatarPatched = 'S=(0,q.jsx)(AvatarKit.StudentAvatar,{avatarKey:n.student.avatarKey,size:44})';
+const requestAvatarSource = 'c=(0,q.jsx)(E.default,{style:ee.avatar,children:(0,q.jsx)(x.default,{size:21,color:B.JournalColors.indigo})})';
+const requestAvatarPatched = 'c=(0,q.jsx)(AvatarKit.StudentAvatar,{avatarKey:n.student.avatarKey,size:44})';
+const friendRowSource = 'const T=`\\u7ba1\\u7406${n.student.nickname}`;let A,N,w,M,P;return';
+const friendRowPatched = 'const T=`\\u7ba1\\u7406${n.student.nickname}`;const chatLabel=`\\u4e0e${n.student.nickname}\\u804a\\u5929`;const chatButton=(0,q.jsx)(R.default,{accessibilityLabel:chatLabel,accessibilityRole:"button",onPress:()=>globalThis.__zqOpenSocialChatForProfile?.(n.student.publicProfileId,n.student.nickname),style:ee.iconButton,children:(0,q.jsx)(ChatIcon.default,{size:20,color:B.JournalColors.indigo})});let A,N,w,M,P;return';
+const friendRowChildrenSource = 'children:[S,I,J,N]}';
+const friendRowChildrenPatched = 'children:[S,I,J,chatButton,N]}';
+const friendsAddButtonSource = '(0,q.jsx)(k.AppButton,{label:"\\u6dfb\\u52a0\\u7b14\\u53cb",icon:f.default,onPress:P})';
+const friendsAddButtonPatched = '(0,q.jsxs)(E.default,{style:{width:"100%",flexDirection:"row",gap:12},children:[(0,q.jsx)(E.default,{style:{flex:1},children:(0,q.jsx)(k.AppButton,{label:"\\u6dfb\\u52a0\\u7b14\\u53cb",icon:f.default,onPress:P})}),(0,q.jsx)(E.default,{style:{flex:1},children:(0,q.jsx)(k.AppButton,{label:"\\u5bfb\\u627e\\u7b14\\u53cb",icon:SearchIcon.default,onPress:()=>globalThis.__zqOpenSocialSearch?.(),variant:"secondary"})})]})';
 
 function safePath(urlPath) {
   const pathname = decodeURIComponent((urlPath || '/').split('?')[0]);
@@ -76,11 +103,22 @@ const server = http.createServer((request, response) => {
       source = source.replace(answerCreateSource, answerCreatePatched);
       source = source.replace(answerSuccessSource, answerSuccessPatched);
       source = source.replace(answerDisabledSource, answerDisabledPatched);
+      source = source.replace(logoutSource, logoutPatched);
+      source = source.replace(settingsLogoutSource, settingsLogoutPatched);
+      source = source.replace(settingsBackSource, settingsBackPatched);
+      source = source.replace(friendsImportSource, friendsImportPatched);
+      source = source.replace(friendsDependencySource, friendsDependencyPatched);
+      source = source.replace(friendAvatarSource, friendAvatarPatched);
+      source = source.replace(requestAvatarSource, requestAvatarPatched);
+      source = source.replace(friendRowSource, friendRowPatched);
+      source = source.replace(friendRowChildrenSource, friendRowChildrenPatched);
+      source = source.replace(friendsAddButtonSource, friendsAddButtonPatched);
       body = Buffer.from(source);
     }
     if (path.extname(file).toLowerCase() === '.html') {
-      const scripts = [avatarPreviewScript, birthdayWheelScript, profileEditFeedbackScript, gamesPlaceholderScript, askBodyScript, askNavigationScript, answerComposerScript];
-      const html = body.toString('utf8');
+      const scripts = [avatarPreviewScript, birthdayWheelScript, profileEditFeedbackScript, gamesPlaceholderScript, askBodyScript, askNavigationScript, answerComposerScript, keyboardAvoidanceScript, friendsNavigationScript, friendsAuthGuardScript, socialChatScript, videoControlsScript, videoNextScript];
+      let html = body.toString('utf8');
+      if (!html.includes('src="/zhiqu-recommendations.js"')) html = html.replace('</head>', `${recommendationsScript}</head>`);
       body = Buffer.from(html.replace('</body>', `${scripts.join('')}</body>`));
     }
     response.writeHead(200, {
