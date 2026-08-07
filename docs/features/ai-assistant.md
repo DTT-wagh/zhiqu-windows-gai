@@ -1,0 +1,86 @@
+# AI 助手功能说明
+
+## 定位
+
+AI 助手是统一自由输入的纯对话能力，只覆盖陪伴交流、学习问题解答和真实内容推荐。页面没有模式选择、预设问题、快捷回复、固定对白或剧情分支，也没有 RPG、任务、货币、背包、体力和奖励系统。
+
+## 前端集成
+
+仓库没有完整 Expo 源码，因此使用 `frontend/dist/zhiqu-ai-assistant.js` 独立增强脚本，并由 `frontend/serve-static.cjs` 注入一次。
+
+- 在首页、学习、AI 助手、社区、我的主路由上接管原底栏，固定为五等分。
+- AI 助手位于第 3 项，路由为 `/ai-assistant`。
+- AI 图标激活时通过 `transform: translateY(-8px)` 抬升，未改变导航高度。
+- `prefers-reduced-motion: reduce` 时取消位移和加载动画。
+- `/ai-assistant` 使用唯一 `data-zq-ai-assistant-page` 标记，路由、刷新、前进后退和 DOM 重渲染不会重复挂载。
+- 左上角 `+` 会创建并切换到独立新会话；旧消息会先清空，页面显示“正在创建新对话”状态，并通过 320ms 的轻量过渡明确当前会话已切换。开启 `prefers-reduced-motion: reduce` 时不执行该动画。
+- 会话标题默认使用服务端生成的时间标签；首条用户消息成功保存后，服务端使用隐私脱敏后的首条消息前 36 个字符更新标题，前端同步更新左侧标签。
+- 发送消息时先立即显示用户气泡，再显示“正在根据当前上下文生成”的思考指示；用户和服务端回复气泡使用约 560ms 的缩放进入动画，从各自消息方向的下角由小变大，减少动态效果时自动关闭。
+- 对话重绘会保留用户当前滚动位置；仅在发送、切换会话或原本已贴近底部时跟随最新消息，并使用瞬时定位避免从顶部平滑滑到底部。
+- 对话页使用项目内生成的 CSS 原创角色视觉，没有引用第三方角色、插画、声音或世界观。
+- 输入失败或停止生成时保留草稿；模型回复只来自后端。
+- 游客进入后显示独立登录提醒，不自动跳转。
+- 未配置模型时显示 `server/.env` 配置错误，不显示模拟聊天内容。
+
+## 服务端流程
+
+1. 根据 JWT 确认当前用户和会话归属。
+2. 对消息做长度限制和私人联系方式脱敏，不记录完整聊天正文到日志。
+3. 每账号最多每分钟发起 12 次新 AI 请求。
+4. 从真实数据库读取用户昵称、通用学生阶段、最近观看、收藏、未掌握错题、已发布课程和审核通过的社区问题。
+5. 将最近 12 条消息和会话动态摘要加入模型上下文。
+6. 模型自动返回 `CHAT`、`QUESTION` 或 `RECOMMENDATION`，并输出结构化 JSON。
+7. 服务端校验 `reply`、`intent`、`safety`、来源 ID 和推荐内容 ID。
+8. `QUESTION` 没有真实来源时，只允许模型明确说明资料不足；否则拒绝该响应。
+9. `RECOMMENDATION` 只能保留实时内容候选池中真实存在的对象。
+10. 成功后保存助手消息和动态摘要；长期记忆只有用户勾选后才启用。
+
+## 内容检索与推荐
+
+学习来源来自：
+
+- `contents`、`categories`
+- 已审核社区问题及发布版本
+- `viewing_history`
+- `favorites`
+- `wrong_answers`
+
+推荐候选必须满足：
+
+- `contents.status = PUBLISHED`
+- `contents.review_status = APPROVED`
+- 标题和摘要存在
+- 视频具有 `media_url`，或存在 `READY` 的 `video_assets`
+
+模型只能从候选池返回 `contentId`。服务端再次查表映射标题、封面、分类、难度、时长和 `/content/{id}` 路由，模型不能自行构造跳转地址。
+
+## 数据库
+
+V42 创建：
+
+- `assistant_conversations`：账号隔离的会话、动态摘要和记忆开关。
+- `assistant_messages`：用户/助手消息、意图、来源、推荐、安全状态和幂等键。
+- `assistant_memory`：默认关闭的长期摘要；只有明确授权后启用。
+- `assistant_recommendation_events`：有帮助/没帮助及推荐打开事件的可扩展记录。
+
+基线 JAR 不修改。`patch-ai-assistant.cjs` 将新增 Java 类和 V42 迁移写入 `server/generated/zhiqu-server.jar`，并由 `patch-manifest.json` 固定执行顺序。
+
+## 安全与可靠性
+
+- 模型系统边界明确要求适龄、隐私保护、禁止奖励和游戏化资源。
+- 邮箱、手机号、QQ/微信账号和长证件号在入库及发送模型前脱敏。
+- 模型请求 35 秒超时；429 和 5xx 最多重试一次。
+- 失败信息不包含供应商原始响应或完整用户消息。
+- 删除会话为账号范围内软删除。
+- 模型不能修改学习进度、收藏、错题、奖励或用户资料。
+
+## 构建和回滚
+
+构建：
+
+```powershell
+node server/patch-src/apply-patches.cjs
+node --check frontend/dist/zhiqu-ai-assistant.js
+```
+
+回滚前端时，从 `frontend/serve-static.cjs` 的脚本数组移除 `aiAssistantScript`。回滚后端时，从 `patch-manifest.json` 移除 `ai-assistant` 补丁并重新执行补丁装配。V42 属于只新增迁移，已经执行的数据库不应删除或改写迁移记录；需要下线时保留表并停止接口使用。

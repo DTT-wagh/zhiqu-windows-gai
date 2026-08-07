@@ -34,6 +34,8 @@ const socialChatScript = '<script src="/zhiqu-social-chat.js"></script>';
 const videoControlsScript = '<script src="/zhiqu-video-controls.js"></script>';
 const videoNextScript = '<script src="/zhiqu-video-next.js"></script>';
 const recommendationsScript = '<script src="/zhiqu-recommendations.js"></script>';
+const guestAccessScript = '<script src="/zhiqu-guest-access.js"></script>';
+const aiAssistantScript = '<script src="/zhiqu-ai-assistant.js"></script>';
 const apiBaseUrl = String(process.env.ZHIQU_API_BASE_URL || '').trim().replace(/\/+$/, '');
 const apiConfigScript = `<script>globalThis.__ZHIQU_API_BASE_URL=${JSON.stringify(apiBaseUrl).replace(/</g, '\\u003c')};</script>`;
 const askThemeToggleSource = 'function(e){oe(()=>{s(e),B(""),Q([])})';
@@ -57,7 +59,13 @@ const answerDisabledPatched = 'disabled:!R.trim()&&!globalThis.__zqHasAnswerImag
 const logoutSource = "_e.logout=async function(){const e=l?.refreshToken;if(e)try{await T('/api/auth/logout',{method:'POST',body:{refreshToken:e},auth:'none'})}finally{await h(null)}else await h(null)}";
 const logoutPatched = "_e.logout=async function(){const e=l?.refreshToken;await h(null);if(e){T('/api/auth/logout',{method:'POST',body:{refreshToken:e},auth:'none'}).catch(()=>{})}}";
 const settingsLogoutSource = "async function J(){if(!o){n(!0);try{await e(),t.router.replace('/login')}finally{n(!1)}}}";
-const settingsLogoutPatched = "async function J(){if(!o){n(!0);try{const logoutPromise=e();t.router.replace('/login');await logoutPromise}finally{n(!1)}}}";
+const settingsLogoutPatched = "async function J(){if(!o){n(!0);try{await e();globalThis.location.replace('/')}finally{n(!1)}}}";
+const apiGuestAccessSource = ",'required'===n&&!l)throw new c(401,{code:'UNAUTHORIZED',message:'\\u8bf7\\u5148\\u767b\\u5f55'});";
+const apiGuestAccessPatched = ",'required'===n&&!l){const r=globalThis.__zqGuestApiRequest?.(e,t);if(r)return r;if('GET'!==String(t.method||'GET').toUpperCase())globalThis.__zqRequireLogin?.();throw new c(401,{code:'UNAUTHORIZED',message:'\\u8bf7\\u5148\\u767b\\u5f55'});}";
+const rootSessionRedirectSource = 'const b=f?"/(tabs)":"/login"';
+const rootSessionRedirectPatched = 'const b="/(tabs)"';
+const tabsSessionGuardSource = 'if(!s){let t;return e[1]===Symbol.for("react.memo_cache_sentinel")?(t=(0,k.jsx)(n.Redirect,{href:"/login"}),e[1]=t):t=e[1],t}';
+const tabsSessionGuardPatched = '';
 const settingsBackSource = 'accessibilityLabel:"\\u8fd4\\u56de\\u6211\\u7684",accessibilityRole:"button",onPress:()=>t.router.back()';
 const settingsBackPatched = 'accessibilityLabel:"\\u8fd4\\u56de\\u6211\\u7684",accessibilityRole:"button",onPress:()=>{const e=t.router.canGoBack?.();e?t.router.back():t.router.replace("/")}';
 const friendsImportSource = 'q=r(_d[31]);function w()';
@@ -74,11 +82,58 @@ const friendRowChildrenSource = 'children:[S,I,J,N]}';
 const friendRowChildrenPatched = 'children:[S,I,J,chatButton,N]}';
 const friendsAddButtonSource = '(0,q.jsx)(k.AppButton,{label:"\\u6dfb\\u52a0\\u7b14\\u53cb",icon:f.default,onPress:P})';
 const friendsAddButtonPatched = '(0,q.jsxs)(E.default,{style:{width:"100%",flexDirection:"row",gap:12},children:[(0,q.jsx)(E.default,{style:{flex:1},children:(0,q.jsx)(k.AppButton,{label:"\\u6dfb\\u52a0\\u7b14\\u53cb",icon:f.default,onPress:P})}),(0,q.jsx)(E.default,{style:{flex:1},children:(0,q.jsx)(k.AppButton,{label:"\\u5bfb\\u627e\\u7b14\\u53cb",icon:SearchIcon.default,onPress:()=>globalThis.__zqOpenSocialSearch?.(),variant:"secondary"})})]})';
+const guestHomeSource = 'function M(){return(0,I.apiRequest)("/api/learning")}function H(){return(0,I.apiRequest)("/api/home")}';
+const guestHomePatched = 'function M(){return globalThis.__zqIsGuestSession?.()?globalThis.__zqGuestLearning("/api/learning"):(0,I.apiRequest)("/api/learning")}function H(){return globalThis.__zqIsGuestSession?.()?globalThis.__zqGuestHome():(0,I.apiRequest)("/api/home")}';
+const guestProfileUserSource = 'function Z(){return(0,I.apiRequest)("/api/users/me")}';
+const guestProfileUserPatched = 'function Z(){return globalThis.__zqIsGuestSession?.()?Promise.resolve(globalThis.__zqGuestProfile()):(0,I.apiRequest)("/api/users/me")}';
+const guestProfileHistorySource = 'function Q(){return(0,I.apiRequest)("/api/history")}';
+const guestProfileHistoryPatched = 'function Q(){return globalThis.__zqIsGuestSession?.()?Promise.resolve([]):(0,I.apiRequest)("/api/history")}';
+const guestProfileFavoritesSource = 'function V(){return(0,I.apiRequest)("/api/favorites")}';
+const guestProfileFavoritesPatched = 'function V(){return globalThis.__zqIsGuestSession?.()?Promise.resolve([]):(0,I.apiRequest)("/api/favorites")}';
+const guestProfileLearningSource = 'function U(){return(0,I.apiRequest)("/api/learning")}';
+const guestProfileLearningPatched = 'function U(){return globalThis.__zqIsGuestSession?.()?globalThis.__zqGuestLearning("/api/learning"):(0,I.apiRequest)("/api/learning")}';
+const guestProfileHomeSource = 'function G(){return(0,I.apiRequest)("/api/home")}';
+const guestProfileHomePatched = 'function G(){return globalThis.__zqIsGuestSession?.()?globalThis.__zqGuestHome():(0,I.apiRequest)("/api/home")}';
+const guestProfileLedgerSource = 'function Y(){return(0,I.listRewardLedger)(8)}';
+const guestProfileLedgerPatched = 'function Y(){return globalThis.__zqIsGuestSession?.()?Promise.resolve([]):(0,I.listRewardLedger)(8)}';
+const guestProfileRewardsSource = 'queryFn:I.getRewardSummary';
+const guestProfileRewardsPatched = 'queryFn:()=>globalThis.__zqIsGuestSession?.()?Promise.resolve(globalThis.__zqGuestRewardSummary()):I.getRewardSummary()';
+const guestProfileSocialSource = 'queryFn:q.getSocialMe';
+const guestProfileSocialPatched = 'queryFn:()=>globalThis.__zqIsGuestSession?.()?Promise.resolve({friendCount:0,incomingRequestCount:0}):q.getSocialMe()';
+const guestProfileEditSource = 'function K(){return n.router.push("/profile/edit")}';
+const guestProfileEditPatched = 'function K(){return n.router.push(globalThis.__zqIsGuestSession?.()?"/login":"/profile/edit")}';
+
+function routeDocumentFor(pathname, resolved) {
+  const directDocument = `${resolved}.html`;
+  if (directDocument.startsWith(root) && fs.existsSync(directDocument)) return directDocument;
+
+  const segments = pathname.split('/').filter(Boolean);
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    for (const parameter of ['[id]', '[section]']) {
+      const candidateSegments = segments.slice();
+      candidateSegments[index] = parameter;
+      const candidate = path.resolve(root, `./${candidateSegments.join('/')}.html`);
+      if (candidate.startsWith(root) && fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+}
 
 function safePath(urlPath) {
   const pathname = decodeURIComponent((urlPath || '/').split('?')[0]);
   const resolved = path.resolve(root, `.${pathname}`);
-  return resolved.startsWith(root) ? resolved : null;
+  if (!resolved.startsWith(root)) return null;
+
+  // Expo exports route documents as `/route.html` and `/route/[id].html`,
+  // while the browser uses extensionless URLs. Resolve the matching artifact
+  // before falling back to the SPA shell; otherwise the root loading document
+  // is hydrated against every route and React reports a mismatch.
+  const unresolvedOrDirectory = !fs.existsSync(resolved) || fs.statSync(resolved).isDirectory();
+  if (!path.extname(pathname) && unresolvedOrDirectory) {
+    const routeDocument = routeDocumentFor(pathname, resolved);
+    if (routeDocument) return routeDocument;
+  }
+  return resolved;
 }
 
 const server = http.createServer((request, response) => {
@@ -107,6 +162,9 @@ const server = http.createServer((request, response) => {
       source = source.replace(answerDisabledSource, answerDisabledPatched);
       source = source.replace(logoutSource, logoutPatched);
       source = source.replace(settingsLogoutSource, settingsLogoutPatched);
+      source = source.replace(apiGuestAccessSource, apiGuestAccessPatched);
+      source = source.replace(rootSessionRedirectSource, rootSessionRedirectPatched);
+      source = source.replace(tabsSessionGuardSource, tabsSessionGuardPatched);
       source = source.replace(settingsBackSource, settingsBackPatched);
       source = source.replace(friendsImportSource, friendsImportPatched);
       source = source.replace(friendsDependencySource, friendsDependencyPatched);
@@ -115,12 +173,27 @@ const server = http.createServer((request, response) => {
       source = source.replace(friendRowSource, friendRowPatched);
       source = source.replace(friendRowChildrenSource, friendRowChildrenPatched);
       source = source.replace(friendsAddButtonSource, friendsAddButtonPatched);
+      source = source.replace(guestHomeSource, guestHomePatched);
+      source = source.replace(guestProfileUserSource, guestProfileUserPatched);
+      source = source.replace(guestProfileHistorySource, guestProfileHistoryPatched);
+      source = source.replace(guestProfileFavoritesSource, guestProfileFavoritesPatched);
+      source = source.replace(guestProfileLearningSource, guestProfileLearningPatched);
+      source = source.replace(guestProfileHomeSource, guestProfileHomePatched);
+      source = source.replace(guestProfileLedgerSource, guestProfileLedgerPatched);
+      source = source.replace(guestProfileRewardsSource, guestProfileRewardsPatched);
+      source = source.replace(guestProfileSocialSource, guestProfileSocialPatched);
+      source = source.replace(guestProfileEditSource, guestProfileEditPatched);
       body = Buffer.from(source);
     }
     if (path.extname(file).toLowerCase() === '.html') {
-      const scripts = [apiConfigScript, avatarPreviewScript, birthdayWheelScript, profileEditFeedbackScript, gamesPlaceholderScript, askBodyScript, askNavigationScript, answerComposerScript, keyboardAvoidanceScript, friendsNavigationScript, friendsAuthGuardScript, socialChatScript, videoControlsScript, videoNextScript];
+      const standaloneAssistant = path.basename(file) === 'ai-assistant.html';
+      const scripts = standaloneAssistant
+        ? [apiConfigScript, aiAssistantScript]
+        : [apiConfigScript, guestAccessScript, avatarPreviewScript, birthdayWheelScript, profileEditFeedbackScript, gamesPlaceholderScript, askBodyScript, askNavigationScript, answerComposerScript, keyboardAvoidanceScript, friendsNavigationScript, friendsAuthGuardScript, socialChatScript, videoControlsScript, videoNextScript, aiAssistantScript];
       let html = body.toString('utf8');
-      if (!html.includes('src="/zhiqu-recommendations.js"')) html = html.replace('</head>', `${recommendationsScript}</head>`);
+      if (!standaloneAssistant && !html.includes('src="/zhiqu-recommendations.js"')) {
+        html = html.replace('</head>', `${recommendationsScript}</head>`);
+      }
       body = Buffer.from(html.replace('</body>', `${scripts.join('')}</body>`));
     }
     response.writeHead(200, {

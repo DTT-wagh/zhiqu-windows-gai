@@ -70,6 +70,81 @@
     return heading?.textContent?.trim() || '';
   }
 
+  function findContentHeading() {
+    return Array.from(document.querySelectorAll('h1, h2, [role="heading"]'))
+      .find((heading) => heading.textContent?.trim() === '学习内容') || null;
+  }
+
+  function returnFromContent() {
+    if (document.referrer) {
+      try {
+        const current = new URL(window.location.href);
+        const previous = new URL(document.referrer);
+        const currentPath = `${current.pathname}${current.search}${current.hash}`;
+        const previousPath = `${previous.pathname}${previous.search}${previous.hash}`;
+        if (previous.origin === current.origin && previousPath !== currentPath) {
+          window.history.back();
+          return;
+        }
+      } catch {
+        // A malformed referrer falls back to the course catalog.
+      }
+    }
+    window.location.assign('/categories');
+  }
+
+  function removeContentBackButton() {
+    document.querySelectorAll('[data-zq-content-back="true"]').forEach((element) => {
+      const host = element.parentElement;
+      element.remove();
+      host?.classList.remove('zq-content-back-row');
+    });
+  }
+
+  function ensureContentBackButton(contentId) {
+    if (!contentId) {
+      removeContentBackButton();
+      return;
+    }
+    if (document.querySelector('[data-zq-content-back="true"]')) return;
+    const heading = findContentHeading();
+    const host = heading?.parentElement;
+    if (!heading || !host) return;
+    const backButton = document.createElement('button');
+    backButton.type = 'button';
+    backButton.className = 'zq-content-back-button';
+    backButton.setAttribute('data-zq-content-back', 'true');
+    backButton.setAttribute('aria-label', '返回上一页');
+    backButton.setAttribute('title', '返回');
+    backButton.textContent = '←';
+    backButton.addEventListener('click', returnFromContent);
+    host.classList.add('zq-content-back-row');
+    host.insertBefore(backButton, heading);
+  }
+
+  function restoreStandaloneVideoCover() {
+    document.querySelectorAll('[data-zq-video-standalone-cover="true"]').forEach((cover) => {
+      cover.classList.remove('zq-video-standalone-cover-hidden');
+      cover.removeAttribute('data-zq-video-standalone-cover');
+      cover.removeAttribute('aria-hidden');
+    });
+  }
+
+  function ensureVideoCoverLayout(video, contentId) {
+    if (!video || !contentId) {
+      restoreStandaloneVideoCover();
+      return;
+    }
+    const cover = document.querySelector('[data-expoimage="true"]');
+    if (!cover || cover.contains(video)) return;
+    const image = cover.querySelector('img');
+    const coverUrl = image?.currentSrc || image?.src || '';
+    if (!video.poster && coverUrl) video.poster = coverUrl;
+    cover.classList.add('zq-video-standalone-cover-hidden');
+    cover.setAttribute('data-zq-video-standalone-cover', 'true');
+    cover.setAttribute('aria-hidden', 'true');
+  }
+
   function getEpisodeSource(content, supplied) {
     const source = supplied || content || {};
     const series = source.series || source.seriesInfo || source.videoSeries || {};
@@ -171,6 +246,11 @@
     style.id = 'zq-video-next-style';
     style.textContent = `
       .zq-video-next-root { width: 100%; display: grid; gap: 12px; margin-top: 12px; color: #1b332b; }
+      .zq-content-back-row { display: flex !important; flex-direction: row !important; align-items: center !important; gap: 8px; min-height: 64px; }
+      .zq-content-back-button { box-sizing: border-box; display: grid; flex: 0 0 44px; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid #d5d9d3; border-radius: 8px; color: #243139; background: #fffdf8; font: inherit; font-size: 27px; line-height: 1; cursor: pointer; }
+      .zq-content-back-button:hover { border-color: #9ebeb2; background: #f3f7f3; }
+      .zq-content-back-button:focus-visible { border-color: #176b64; outline: 3px solid rgba(23, 107, 100, .18); outline-offset: 1px; }
+      .zq-video-standalone-cover-hidden { display: none !important; }
       .zq-video-next-card, .zq-video-series { box-sizing: border-box; width: 100%; border: 1px solid #c8d5cc; border-radius: 10px; background: #fffdf7; box-shadow: 0 5px 15px rgba(28, 52, 43, .08); }
       .zq-video-next-card { display: grid; gap: 14px; padding: 18px; }
       .zq-video-next-card[hidden], .zq-video-series[hidden] { display: none; }
@@ -479,7 +559,10 @@
   function scan() {
     scanTimer = 0;
     const contentId = currentContentId();
+    addStyles();
+    ensureContentBackButton(contentId);
     const video = contentId ? document.querySelector('video') : null;
+    ensureVideoCoverLayout(video, contentId);
     if (!video) {
       if (activeInstance) { activeInstance.destroy(); activeInstance = null; }
       return;

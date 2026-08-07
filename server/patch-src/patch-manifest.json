@@ -12,6 +12,14 @@
     {
       "name": "private-chat",
       "script": "server/patch-src/patch-private-chat.cjs"
+    },
+    {
+      "name": "guest-video-playback",
+      "script": "server/patch-src/patch-guest-video-playback.cjs"
+    },
+    {
+      "name": "ai-assistant",
+      "script": "server/patch-src/patch-ai-assistant.cjs"
     }
   ]
 }

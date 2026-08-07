@@ -58,7 +58,8 @@ public class SecurityConfig {
                         ).permitAll()
                         // Community answers are public, so their published images must be readable without a bearer header.
                         .requestMatchers(HttpMethod.GET, "/api/community/images/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/contents/*/playback").authenticated()
+                        // Published course videos are readable before login; account progress remains protected.
+                        .requestMatchers(HttpMethod.GET, "/api/contents/*/playback").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories", "/api/contents", "/api/contents/**").permitAll()
                         .anyRequest().authenticated()
                 )
