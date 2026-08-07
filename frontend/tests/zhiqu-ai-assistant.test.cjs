@@ -106,6 +106,13 @@ assert.match(script, /sendCurrentMessage\(source\.body, \{ actionMessageId: mess
 assert.match(script, /function retryFailedMessage\(message\)/, 'failed messages must expose retry behavior');
 assert.match(script, /retryButton\.appendChild\(createMessageIcon\('refresh-cw'\)\)/, 'failed message retry must use a discoverable refresh icon');
 assert.match(script, /function createMessageIcon\(name\)/, 'message actions must use shared inline Lucide-style icons');
+assert.match(script, /\.zq-ai-message-icon,\.zq-ai-source-icon\{position:relative;z-index:1;/, 'message icons must remain above their hover and focus background');
+assert.match(script, /portrait\.src = '\/ai-assistant-portrait\.webp'/, 'assistant stage must use the supplied portrait asset');
+assert.match(script, /portrait\.alt = '\\u5b66\\u4e60 AI \\u52a9\\u624b\\u89d2\\u8272\\u7acb\\u7ed8'/, 'portrait asset must remain accessible');
+assert.match(script, /var PORTRAIT_TRIGGER = '\\u5fcd\\u51ac2033'/, 'portrait easter egg must use the exact trigger text');
+assert.match(script, /portrait\.hidden = !state\.portraitVisible/, 'portrait must be hidden by default');
+assert.match(script, /state\.authRequired = false;[\s\S]*?if \(content === PORTRAIT_TRIGGER && settings\.source !== 'regenerate'\) setPortraitVisible\(true\);[\s\S]*?renderDialogue\(\)/, 'submitting the exact trigger must reveal the portrait without waiting for the AI reply');
+assert.match(script, /function openConversation\(id\) \{[\s\S]*?setPortraitVisible\(false\)/, 'switching conversations must hide the portrait');
 assert.match(script, /labelMessageAction\(copyButton, copied \? 'check' : 'copy'/, 'copy action must render an icon with status feedback');
 assert.match(script, /labelMessageAction\(editButton, 'pencil'/, 'edit action must render a pencil icon');
 assert.match(script, /labelMessageAction\(sourceToggle, 'book-open'/, 'source action must render a book icon');
@@ -129,4 +136,4 @@ assert.doesNotMatch(server, /tabsTransitionSource|tabsTransitionPatched/, 'stati
 assert.match(standalonePage, /<body><\/body>/, 'standalone assistant document must not contain pre-rendered chat text');
 assert.match(server, /!standaloneAssistant && !html\.includes/, 'standalone assistant document must not load unrelated recommendation enhancements');
 
-console.log(JSON.stringify({ result: 'ok', checks: 88 }));
+console.log(JSON.stringify({ result: 'ok', checks: 94 }));

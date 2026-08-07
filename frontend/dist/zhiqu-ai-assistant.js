@@ -5,6 +5,7 @@
   window.__zhiquAiAssistantLoaded = true;
 
   var SESSION_KEY = 'zhiqu.auth.session.v1';
+  var PORTRAIT_TRIGGER = '\u5fcd\u51ac2033';
   var PAGE_MARKER = 'data-zq-ai-assistant-page';
   var NAV_MARKER = 'data-zq-ai-global-nav';
   var PRIMARY_ROUTES = new Set(['/', '/(tabs)', '/categories', '/community', '/profile', '/ai-assistant']);
@@ -46,6 +47,7 @@
     deletingMessageId: null,
     confirmMessageDeleteId: null,
     editingMessageId: null,
+    portraitVisible: false,
     nativeRoute: null,
     leavingAssistant: false,
     initialized: false
@@ -240,7 +242,8 @@
       '.zq-ai-stage-title{position:absolute;z-index:2;left:clamp(18px,5vw,58px);top:clamp(22px,5vh,54px);max-width:340px}',
       '.zq-ai-stage-title h1{margin:0;font-size:clamp(22px,3vw,34px);line-height:1.15;letter-spacing:0;font-weight:900;color:#214d47}',
       '.zq-ai-stage-title p{margin:10px 0 0;color:#46665f;font-size:13px;line-height:19px}',
-      '.zq-ai-portrait{position:absolute;z-index:4;right:clamp(18px,10vw,130px);bottom:-8px;width:166px;height:188px;display:block;filter:drop-shadow(0 10px 10px rgba(36,49,57,.14))}',
+      '.zq-ai-portrait{position:absolute;z-index:4;right:clamp(18px,10vw,130px);bottom:-8px;width:220px;height:240px;display:block;object-fit:cover;object-position:center center;mix-blend-mode:multiply;filter:drop-shadow(0 10px 10px rgba(36,49,57,.14));pointer-events:none}',
+      '.zq-ai-portrait[hidden]{display:none!important}',
       '.zq-ai-portrait-body{position:absolute;left:28px;bottom:0;width:112px;height:104px;background:#39766d;border-radius:48px 48px 14px 14px;border:5px solid #fffdfa;box-sizing:border-box}',
       '.zq-ai-portrait-neck{position:absolute;left:69px;top:81px;width:30px;height:31px;background:#e7b89f;border:4px solid #fffdfa;box-sizing:border-box}',
       '.zq-ai-portrait-head{position:absolute;left:42px;top:14px;width:86px;height:84px;background:#edc2aa;border-radius:43px 43px 38px 38px;border:5px solid #fffdfa;box-sizing:border-box}',
@@ -275,13 +278,13 @@
       '.zq-ai-rec-title{font-size:12px;line-height:17px;font-weight:900;overflow-wrap:anywhere}',
       '.zq-ai-rec-reason{margin-top:3px;color:var(--zq-ai-soft);font-size:10px;line-height:15px}',
       '.zq-ai-feedback{display:flex;gap:2px;margin-top:6px}',
-      '.zq-ai-feedback button,.zq-ai-message-action,.zq-ai-source-toggle{position:relative;width:44px;min-width:44px;height:44px;min-height:44px;display:inline-grid;place-items:center;border:0;border-radius:50%;background:transparent;color:var(--zq-ai-soft);padding:0;cursor:pointer}',
-      '.zq-ai-feedback button::before,.zq-ai-message-action::before,.zq-ai-source-toggle::before{content:"";position:absolute;inset:5px;border-radius:50%;background:transparent;transition:background-color 140ms ease-out}',
+      '.zq-ai-feedback button,.zq-ai-message-action,.zq-ai-source-toggle{position:relative;isolation:isolate;width:44px;min-width:44px;height:44px;min-height:44px;display:inline-grid;place-items:center;border:0;border-radius:50%;background:transparent;color:var(--zq-ai-soft);padding:0;cursor:pointer}',
+      '.zq-ai-feedback button::before,.zq-ai-message-action::before,.zq-ai-source-toggle::before{content:"";position:absolute;z-index:0;inset:5px;border-radius:50%;background:transparent;transition:background-color 140ms ease-out}',
       '.zq-ai-feedback button:hover::before,.zq-ai-feedback button:focus-visible::before,.zq-ai-message-action:hover::before,.zq-ai-message-action:focus-visible::before,.zq-ai-source-toggle:hover::before,.zq-ai-source-toggle:focus-visible::before{background:#f1f3f2}',
       '.zq-ai-feedback button:hover,.zq-ai-feedback button:focus-visible,.zq-ai-message-action:hover,.zq-ai-message-action:focus-visible,.zq-ai-source-toggle:hover,.zq-ai-source-toggle:focus-visible{color:var(--zq-ai-teal);outline:2px solid rgba(57,118,109,.22);outline-offset:-1px}',
       '.zq-ai-message-actions{display:flex;flex-wrap:wrap;gap:2px;margin-top:6px;align-items:center}',
       '.zq-ai-message-action:disabled{opacity:.55;cursor:wait}',
-      '.zq-ai-message-icon,.zq-ai-source-icon{width:18px;height:18px;display:block;pointer-events:none}',
+      '.zq-ai-message-icon,.zq-ai-source-icon{position:relative;z-index:1;width:18px;height:18px;display:block;pointer-events:none}',
       '.zq-ai-message-action[aria-busy="true"] .zq-ai-message-icon{animation:zqAiIconSpin 900ms linear infinite}',
       '.zq-ai-message-failure{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;color:#a23e35;font-size:12px;line-height:18px}',
       '.zq-ai-message-failure button{color:#a23e35;font-weight:800}',
@@ -310,7 +313,7 @@
       '@keyframes zqAiConversationLabel{from{opacity:.35;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}',
       '@keyframes zqAiMessageIn{0%{opacity:.08;transform:translateY(8px) scale(.82)}72%{opacity:1;transform:translateY(-1px) scale(1.02)}100%{opacity:1;transform:translateY(0) scale(1)}}',
       '@keyframes zqAiPulse{0%,100%{opacity:.28;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}',
-      '@media(max-width:760px){.zq-ai-shell{grid-template-columns:1fr}.zq-ai-sidebar-scrim{display:block;position:fixed;z-index:10;inset:0;background:rgba(20,30,35,.42);opacity:0;pointer-events:none;transition:opacity 180ms ease-out}.zq-ai-sidebar-scrim:not([hidden]){opacity:1;pointer-events:auto}.zq-ai-sidebar{position:absolute;z-index:20;inset:0 18% 0 0;transform:translateX(-104%);transition:transform 180ms ease-out;box-shadow:12px 0 24px rgba(36,49,57,.18);touch-action:pan-y}.zq-ai-sidebar[data-open="true"]{transform:translateX(0)}.zq-ai-icon-button.zq-ai-sidebar-close{display:grid}.zq-ai-main{grid-template-rows:minmax(136px,24vh) minmax(0,1fr)}.zq-ai-stage-title{left:18px;top:22px;max-width:48%}.zq-ai-stage-title p{display:none}.zq-ai-portrait{right:18px;width:145px;height:166px;transform:scale(.88);transform-origin:bottom right}.zq-ai-mobile-menu{display:grid}.zq-ai-toolbar{padding-inline:10px}.zq-ai-memory span{display:none}.zq-ai-messages{padding:14px 12px 18px}.zq-ai-bubble{max-width:88%;font-size:13px;line-height:20px}.zq-ai-recommendations{grid-template-columns:1fr}.zq-ai-nav-item{min-height:52px}.zq-ai-composer{padding-inline:10px}}',
+      '@media(max-width:760px){.zq-ai-shell{grid-template-columns:1fr}.zq-ai-sidebar-scrim{display:block;position:fixed;z-index:10;inset:0;background:rgba(20,30,35,.42);opacity:0;pointer-events:none;transition:opacity 180ms ease-out}.zq-ai-sidebar-scrim:not([hidden]){opacity:1;pointer-events:auto}.zq-ai-sidebar{position:absolute;z-index:20;inset:0 18% 0 0;transform:translateX(-104%);transition:transform 180ms ease-out;box-shadow:12px 0 24px rgba(36,49,57,.18);touch-action:pan-y}.zq-ai-sidebar[data-open="true"]{transform:translateX(0)}.zq-ai-icon-button.zq-ai-sidebar-close{display:grid}.zq-ai-main{grid-template-rows:minmax(136px,24vh) minmax(0,1fr)}.zq-ai-stage-title{left:18px;top:22px;max-width:48%}.zq-ai-stage-title p{display:none}.zq-ai-portrait{right:18px;width:190px;height:220px;transform:scale(.88);transform-origin:bottom right}.zq-ai-mobile-menu{display:grid}.zq-ai-toolbar{padding-inline:10px}.zq-ai-memory span{display:none}.zq-ai-messages{padding:14px 12px 18px}.zq-ai-bubble{max-width:88%;font-size:13px;line-height:20px}.zq-ai-recommendations{grid-template-columns:1fr}.zq-ai-nav-item{min-height:52px}.zq-ai-composer{padding-inline:10px}}',
       '@media(max-width:390px){.zq-ai-stage-title h1{font-size:20px}.zq-ai-portrait{right:4px}.zq-ai-nav-item{font-size:9px}.zq-ai-dialogue{backdrop-filter:none}}',
       '@media(prefers-reduced-motion:reduce){.zq-ai-page,#root.zq-ai-native-page-enter,.zq-ai-nav-icon,.zq-ai-sidebar,.zq-ai-sidebar-scrim,.zq-ai-send,.zq-ai-dialogue[data-conversation-switching="true"],.zq-ai-conversation-list[data-switching="true"] .zq-ai-conversation[data-active="true"],.zq-ai-message[data-entering="true"] .zq-ai-bubble{transition:none!important;animation:none!important}.zq-ai-nav-item[data-active="true"] .zq-ai-nav-icon{transform:none}.zq-ai-loading-dots i{animation:none}.zq-ai-messages{scroll-behavior:auto}}'
     ].join('');
@@ -467,26 +470,19 @@
   }
 
   function createPortrait() {
-    var portrait = document.createElement('div');
+    var portrait = document.createElement('img');
     portrait.className = 'zq-ai-portrait';
-    portrait.setAttribute('role', 'img');
-    portrait.setAttribute('aria-label', '\u539f\u521b AI \u5b66\u4e60\u52a9\u624b\u89d2\u8272\u5f62\u8c61');
-    ['zq-ai-portrait-hair', 'zq-ai-portrait-head', 'zq-ai-portrait-neck', 'zq-ai-portrait-body'].forEach(function (className) {
-      var part = document.createElement('span');
-      part.className = className;
-      portrait.appendChild(part);
-    });
-    var leftEye = document.createElement('span');
-    leftEye.className = 'zq-ai-eye left';
-    var rightEye = document.createElement('span');
-    rightEye.className = 'zq-ai-eye right';
-    var mouth = document.createElement('span');
-    mouth.className = 'zq-ai-mouth';
-    var pin = document.createElement('span');
-    pin.className = 'zq-ai-pin';
-    pin.textContent = '\u2726';
-    portrait.append(leftEye, rightEye, mouth, pin);
+    portrait.src = '/ai-assistant-portrait.webp';
+    portrait.alt = '\u5b66\u4e60 AI \u52a9\u624b\u89d2\u8272\u7acb\u7ed8';
+    portrait.decoding = 'async';
+    portrait.hidden = !state.portraitVisible;
     return portrait;
+  }
+
+  function setPortraitVisible(visible) {
+    state.portraitVisible = !!visible;
+    var portrait = document.querySelector('[' + PAGE_MARKER + '] .zq-ai-portrait');
+    if (portrait) portrait.hidden = !state.portraitVisible;
   }
 
   function buildPage() {
@@ -596,6 +592,7 @@
     state.conversationTransitionTimer = null;
     if (state.abortController) state.abortController.abort();
     state.abortController = null;
+    state.portraitVisible = false;
   }
 
   function detachAssistantOverlay() {
@@ -616,6 +613,7 @@
     state.conversationTransitionTimer = null;
     if (state.abortController) state.abortController.abort();
     state.abortController = null;
+    state.portraitVisible = false;
     state.leavingAssistant = true;
   }
 
@@ -1167,6 +1165,7 @@
 
   function createConversation(options) {
     if (state.loading || !session() || !state.config || !state.config.configured) return Promise.resolve();
+    setPortraitVisible(false);
     var animate = !!(options && options.animate);
     var previousConversationId = state.activeConversationId;
     var previousMessages = state.messages;
@@ -1215,6 +1214,7 @@
 
   function openConversation(id) {
     if (!id) return Promise.resolve();
+    setPortraitVisible(false);
     state.activeConversationId = id;
     var conversation = state.conversations.find(function (item) { return item.id === id; });
     state.memoryEnabled = !!(conversation && conversation.memoryEnabled);
@@ -1259,6 +1259,7 @@
     state.loadingLabel = '';
     state.error = '';
     state.authRequired = false;
+    if (content === PORTRAIT_TRIGGER && settings.source !== 'regenerate') setPortraitVisible(true);
     renderDialogue();
     var controller = new AbortController();
     state.abortController = controller;
