@@ -45,12 +45,27 @@ public class AiAssistantController {
 
     @PostMapping("/conversations")
     ResponseEntity<ConversationCreatedResponse> createConversation(
-            @RequestBody(required = false) CreateConversationRequest request,
+            @Valid @RequestBody(required = false) CreateConversationRequest request,
             Authentication authentication
     ) {
-        boolean memoryEnabled = request != null && request.memoryEnabledOrDefault();
+        CreateConversationRequest settings = request == null
+                ? new CreateConversationRequest(null, false)
+                : request;
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(service.createConversation(authentication.getName(), memoryEnabled));
+                .body(service.createConversation(
+                        authentication.getName(),
+                        settings.memoryEnabledOrDefault(),
+                        settings.requestIdOrDefault()
+                ));
+    }
+
+    @DeleteMapping("/requests/{requestId}")
+    ResponseEntity<Void> cancelGeneration(
+            @PathVariable String requestId,
+            Authentication authentication
+    ) {
+        service.cancelGeneration(authentication.getName(), requestId);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/conversations/{conversationId}/messages")

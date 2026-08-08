@@ -41,6 +41,7 @@ Migration: V42
 
 ```json
 {
+  "requestId": "uuid",
   "memoryEnabled": false
 }
 ```
@@ -125,7 +126,7 @@ Migration: V42
 
 相同 `requestId` 重试时返回已存在的消息交换，不重复保存。并发请求通过用户消息 `request_id` 和助手消息 `reply_to_message_id` 唯一索引收敛。
 
-前端的失败重试复用原始 `requestId`，重新生成使用新的 `requestId` 调用消息发送接口；服务端仍按真实模型生成回复，不返回前端伪造内容。
+前端的失败重试复用原始 `requestId`。重新生成不会调用普通消息发送接口，而是针对最近一条用户消息调用更新接口，并原位替换它直接关联的 AI 回复，因此用户消息和 AI 消息的数量、ID 与顺序保持不变。
 
 首条用户消息成功保存后，服务端使用经过隐私脱敏的消息正文作为会话标题，并截取前 36 个字符。后续消息只更新会话摘要和更新时间，不覆盖用户已经形成的标题。前端可以先显示本地状态，随后以会话列表接口返回的服务端标题为准。
 
@@ -137,7 +138,15 @@ Migration: V42
 
 只有最近一条用户消息允许编辑；其他消息返回 `409 ASSISTANT_EDIT_NOT_LATEST`。接口沿用现有登录鉴权和会话归属校验。
 
+“重新生成”复用该接口，提交与原用户消息相同的正文和新的 `requestId`。这不会新增用户消息，也不会追加第二条 AI 回复。
+
 隐藏语气模式不新增请求字段。服务端根据当前会话中真实保存的用户消息判断是否激活，因此刷新、重新进入会话和后续消息请求均保持一致；删除或编辑掉唯一激活消息后自动恢复默认语气。
+
+## DELETE /api/assistant/requests/{requestId}
+
+停止当前账号对应 `requestId` 的生成任务并返回 `204`。接口幂等：任务尚未登记、已经停止或已经结束时仍返回 `204`，不会暴露其他账号的任务状态。
+
+服务端生成任务按账号和 `requestId` 隔离。取消请求会标记任务已停止，并调用 `CompletableFuture.cancel(true)` 中止正在进行的模型 HTTP 请求；模型结果在写入数据库前还会再次检查取消状态。新建会话、发送消息、编辑消息和重新生成都使用同一取消链路。
 
 ## GET /api/assistant/recommendations
 
@@ -167,6 +176,8 @@ Migration: V42
 | 401 | `UNAUTHORIZED` | 未登录或令牌失效 |
 | 404 | `ASSISTANT_NOT_FOUND` | 会话、消息或推荐对象不存在 |
 | 409 | `ASSISTANT_REQUEST_CONFLICT` | 幂等请求发生冲突 |
+| 409 | `AI_GENERATION_IN_PROGRESS` | 相同请求正在生成 |
+| 409 | `AI_GENERATION_CANCELLED` | 服务端生成任务已停止 |
 | 409 | `ASSISTANT_EDIT_NOT_LATEST` | 只能编辑当前会话最近一条用户消息 |
 | 429 | `ASSISTANT_RATE_LIMITED` | 每账号每分钟请求数超限 |
 | 502 | `AI_RESPONSE_INVALID` | 模型结构未通过校验 |

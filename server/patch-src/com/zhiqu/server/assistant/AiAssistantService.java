@@ -58,12 +58,19 @@ public class AiAssistantService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final AiAssistantClient client;
+    private final AiAssistantGenerationRegistry generationRegistry;
     private final ConcurrentHashMap<String, Deque<Long>> requestWindows = new ConcurrentHashMap<>();
 
-    public AiAssistantService(JdbcTemplate jdbc, ObjectMapper objectMapper, AiAssistantClient client) {
+    public AiAssistantService(
+            JdbcTemplate jdbc,
+            ObjectMapper objectMapper,
+            AiAssistantClient client,
+            AiAssistantGenerationRegistry generationRegistry
+    ) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.client = client;
+        this.generationRegistry = generationRegistry;
     }
 
     ConfigResponse config(String userId) {
@@ -81,41 +88,56 @@ public class AiAssistantService {
                 """, (rs, rowNum) -> conversationView(rs, userId), userId);
     }
 
-    ConversationCreatedResponse createConversation(String userId, boolean memoryEnabled) {
+    ConversationCreatedResponse createConversation(
+            String userId,
+            boolean memoryEnabled,
+            String requestId
+    ) {
         requireUser(userId);
         enforceRateLimit(userId);
 
         String conversationId = UUID.randomUUID().toString();
-        List<SourceCandidate> suppliedSources = loadSourceCandidates();
-        List<ContentCandidate> catalog = loadCatalog(userId);
-        String context = buildContext(
-                "FIRST_GREETING",
+        AiAssistantGenerationRegistry.GenerationHandle generation = generationRegistry.begin(
                 userId,
                 conversationId,
-                "",
-                memoryEnabled,
-                List.of(),
-                suppliedSources,
-                catalog
+                requestId
         );
-        ModelResult model = validateModelResult(
-                applyPersonaReply(client.generate(context), false),
-                suppliedSources,
-                catalog
-        );
-        Instant now = Instant.now();
-        String title = "AI 助手 " + DateTimeFormatter.ofPattern("MM-dd HH:mm")
-                .withZone(ZoneId.of("Asia/Shanghai"))
-                .format(now);
-        jdbc.update("""
-                INSERT INTO assistant_conversations
-                    (id, user_id, title, summary, memory_enabled, created_at, updated_at, deleted_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-                """, conversationId, userId, title, blankToNull(model.conversationSummary()), memoryEnabled, Timestamp.from(now), Timestamp.from(now));
+        try {
+            generation.throwIfCancelled();
+            List<SourceCandidate> suppliedSources = loadSourceCandidates();
+            List<ContentCandidate> catalog = loadCatalog(userId);
+            String context = buildContext(
+                    "FIRST_GREETING",
+                    userId,
+                    conversationId,
+                    "",
+                    memoryEnabled,
+                    List.of(),
+                    suppliedSources,
+                    catalog
+            );
+            ModelResult model = validateModelResult(
+                    applyPersonaReply(client.generate(context, generation), false),
+                    suppliedSources,
+                    catalog
+            );
+            generation.throwIfCancelled();
+            Instant now = Instant.now();
+            String title = "AI 助手 " + DateTimeFormatter.ofPattern("MM-dd HH:mm")
+                    .withZone(ZoneId.of("Asia/Shanghai"))
+                    .format(now);
+            jdbc.update("""
+                    INSERT INTO assistant_conversations
+                        (id, user_id, title, summary, memory_enabled, created_at, updated_at, deleted_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+                    """, conversationId, userId, title, blankToNull(model.conversationSummary()), memoryEnabled, Timestamp.from(now), Timestamp.from(now));
 
-        MessageView greeting = insertAssistantMessage(conversationId, null, model, suppliedSources, catalog, now);
-        if (memoryEnabled) persistMemory(userId, model.conversationSummary(), true);
-        return new ConversationCreatedResponse(requireConversationView(userId, conversationId), List.of(greeting));
+            MessageView greeting = insertAssistantMessage(conversationId, null, model, suppliedSources, catalog, now);
+            if (memoryEnabled) persistMemory(userId, model.conversationSummary(), true);
+            return new ConversationCreatedResponse(requireConversationView(userId, conversationId), List.of(greeting));
+        } finally {
+            generationRegistry.finish(generation);
+        }
     }
 
     List<MessageView> listMessages(String userId, String conversationId) {
@@ -137,59 +159,70 @@ public class AiAssistantService {
             if (existingAssistant != null) return new MessageExchangeResponse(existingUser, existingAssistant);
         }
 
-        enforceRateLimit(userId);
-        String safeContent = sanitizeUserContent(request.content());
-        boolean memoryEnabled = request.memoryEnabledOrDefault();
-        Instant now = Instant.now();
-        MessageView userMessage = existingUser;
-        if (userMessage == null) {
-            String messageId = UUID.randomUUID().toString();
-            try {
-                jdbc.update("""
-                        INSERT INTO assistant_messages
-                            (id, conversation_id, author_user_id, role, body, intent, sources_json,
-                             recommendations_json, safety_status, safety_reason, request_id,
-                             reply_to_message_id, created_at)
-                        VALUES (?, ?, ?, 'USER', ?, NULL, NULL, NULL, 'NOT_CHECKED', NULL, ?, NULL, ?)
-                        """, messageId, conversationId, userId, safeContent, request.requestId(), Timestamp.from(now));
-                userMessage = findMessageByRequest(userId, request.requestId());
-            } catch (DuplicateKeyException duplicate) {
-                userMessage = findMessageByRequest(userId, request.requestId());
-            }
-        }
-        if (userMessage == null) {
-            throw new ApiException(HttpStatus.CONFLICT, "ASSISTANT_REQUEST_CONFLICT", "消息请求发生冲突，请重试");
-        }
-
-        List<MessageView> recentMessages = recentMessages(conversationId);
-        List<SourceCandidate> suppliedSources = loadSourceCandidates();
-        List<ContentCandidate> catalog = loadCatalog(userId);
-        String context = buildContext(
-                "RESPOND",
+        AiAssistantGenerationRegistry.GenerationHandle generation = generationRegistry.begin(
                 userId,
                 conversationId,
-                conversation.summary(),
-                memoryEnabled,
-                recentMessages,
-                suppliedSources,
-                catalog
+                request.requestId()
         );
-        ModelResult model = validateModelResult(
-                applyPersonaReply(client.generate(context), ALICE_TRIGGER.equals(safeContent)),
-                suppliedSources,
-                catalog
-        );
-        MessageView assistant;
         try {
-            assistant = insertAssistantMessage(conversationId, userMessage.id(), model, suppliedSources, catalog, Instant.now());
-        } catch (DuplicateKeyException duplicate) {
-            assistant = findAssistantReply(userMessage.id());
-            if (assistant == null) throw duplicate;
-        }
+            generation.throwIfCancelled();
+            enforceRateLimit(userId);
+            String safeContent = sanitizeUserContent(request.content());
+            boolean memoryEnabled = request.memoryEnabledOrDefault();
+            Instant now = Instant.now();
+            MessageView userMessage = existingUser;
+            if (userMessage == null) {
+                String messageId = UUID.randomUUID().toString();
+                try {
+                    jdbc.update("""
+                            INSERT INTO assistant_messages
+                                (id, conversation_id, author_user_id, role, body, intent, sources_json,
+                                 recommendations_json, safety_status, safety_reason, request_id,
+                                 reply_to_message_id, created_at)
+                            VALUES (?, ?, ?, 'USER', ?, NULL, NULL, NULL, 'NOT_CHECKED', NULL, ?, NULL, ?)
+                            """, messageId, conversationId, userId, safeContent, request.requestId(), Timestamp.from(now));
+                    userMessage = findMessageByRequest(userId, request.requestId());
+                } catch (DuplicateKeyException duplicate) {
+                    userMessage = findMessageByRequest(userId, request.requestId());
+                }
+            }
+            if (userMessage == null) {
+                throw new ApiException(HttpStatus.CONFLICT, "ASSISTANT_REQUEST_CONFLICT", "消息请求发生冲突，请重试");
+            }
 
-        updateConversationAfterMessage(userId, conversationId, safeContent, model.conversationSummary(), memoryEnabled);
-        persistMemory(userId, model.conversationSummary(), memoryEnabled);
-        return new MessageExchangeResponse(userMessage, assistant);
+            List<MessageView> recentMessages = recentMessages(conversationId);
+            List<SourceCandidate> suppliedSources = loadSourceCandidates();
+            List<ContentCandidate> catalog = loadCatalog(userId);
+            String context = buildContext(
+                    "RESPOND",
+                    userId,
+                    conversationId,
+                    conversation.summary(),
+                    memoryEnabled,
+                    recentMessages,
+                    suppliedSources,
+                    catalog
+            );
+            ModelResult model = validateModelResult(
+                    applyPersonaReply(client.generate(context, generation), ALICE_TRIGGER.equals(safeContent)),
+                    suppliedSources,
+                    catalog
+            );
+            generation.throwIfCancelled();
+            MessageView assistant;
+            try {
+                assistant = insertAssistantMessage(conversationId, userMessage.id(), model, suppliedSources, catalog, Instant.now());
+            } catch (DuplicateKeyException duplicate) {
+                assistant = findAssistantReply(userMessage.id());
+                if (assistant == null) throw duplicate;
+            }
+
+            updateConversationAfterMessage(userId, conversationId, safeContent, model.conversationSummary(), memoryEnabled);
+            persistMemory(userId, model.conversationSummary(), memoryEnabled);
+            return new MessageExchangeResponse(userMessage, assistant);
+        } finally {
+            generationRegistry.finish(generation);
+        }
     }
 
     @Transactional
@@ -217,42 +250,65 @@ public class AiAssistantService {
             throw new ApiException(HttpStatus.CONFLICT, "ASSISTANT_EDIT_NOT_LATEST", "只能编辑最近一条用户消息");
         }
 
-        enforceRateLimit(userId);
-        String safeContent = sanitizeUserContent(request.content());
-        boolean memoryEnabled = request.memoryEnabledOrDefault();
-        jdbc.update("""
-                UPDATE assistant_messages
-                SET body = ?, request_id = ?, safety_status = 'NOT_CHECKED', safety_reason = NULL
-                WHERE id = ? AND conversation_id = ? AND role = 'USER'
-                """, safeContent, request.requestId(), messageId, conversationId);
-        userMessage = findUserMessage(conversationId, messageId);
-
-        List<MessageView> recentMessages = recentMessagesForEdit(conversationId, messageId);
-        List<SourceCandidate> suppliedSources = loadSourceCandidates();
-        List<ContentCandidate> catalog = loadCatalog(userId);
-        String context = buildContext(
-                "EDIT",
+        AiAssistantGenerationRegistry.GenerationHandle generation = generationRegistry.begin(
                 userId,
                 conversationId,
-                conversation.summary(),
-                memoryEnabled,
-                recentMessages,
-                suppliedSources,
-                catalog
+                request.requestId()
         );
-        ModelResult model = validateModelResult(client.generate(context), suppliedSources, catalog);
-        MessageView assistant = replaceAssistantMessage(
-                conversationId,
-                messageId,
-                model,
-                suppliedSources,
-                catalog,
-                Instant.now()
-        );
+        try {
+            generation.throwIfCancelled();
+            enforceRateLimit(userId);
+            String safeContent = sanitizeUserContent(request.content());
+            boolean memoryEnabled = request.memoryEnabledOrDefault();
+            jdbc.update("""
+                    UPDATE assistant_messages
+                    SET body = ?, request_id = ?, safety_status = 'NOT_CHECKED', safety_reason = NULL
+                    WHERE id = ? AND conversation_id = ? AND role = 'USER'
+                    """, safeContent, request.requestId(), messageId, conversationId);
+            userMessage = findUserMessage(conversationId, messageId);
 
-        updateConversationAfterMessage(userId, conversationId, safeContent, model.conversationSummary(), memoryEnabled);
-        persistMemory(userId, model.conversationSummary(), memoryEnabled);
-        return new MessageExchangeResponse(userMessage, assistant);
+            List<MessageView> recentMessages = recentMessagesForEdit(conversationId, messageId);
+            List<SourceCandidate> suppliedSources = loadSourceCandidates();
+            List<ContentCandidate> catalog = loadCatalog(userId);
+            String context = buildContext(
+                    "EDIT",
+                    userId,
+                    conversationId,
+                    conversation.summary(),
+                    memoryEnabled,
+                    recentMessages,
+                    suppliedSources,
+                    catalog
+            );
+            ModelResult model = validateModelResult(
+                    client.generate(context, generation),
+                    suppliedSources,
+                    catalog
+            );
+            generation.throwIfCancelled();
+            MessageView assistant = replaceAssistantMessage(
+                    conversationId,
+                    messageId,
+                    model,
+                    suppliedSources,
+                    catalog,
+                    Instant.now()
+            );
+
+            updateConversationAfterMessage(userId, conversationId, safeContent, model.conversationSummary(), memoryEnabled);
+            persistMemory(userId, model.conversationSummary(), memoryEnabled);
+            return new MessageExchangeResponse(userMessage, assistant);
+        } finally {
+            generationRegistry.finish(generation);
+        }
+    }
+
+    void cancelGeneration(String userId, String requestId) {
+        requireUser(userId);
+        if (requestId == null || requestId.isBlank() || requestId.length() > 36) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "ASSISTANT_REQUEST_ID_INVALID", "请求标识无效");
+        }
+        generationRegistry.cancel(userId, requestId);
     }
 
     List<RecommendationView> recommendations(String userId) {

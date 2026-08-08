@@ -6,6 +6,10 @@ const script = fs.readFileSync(path.join(__dirname, '..', 'dist', 'zhiqu-ai-assi
 const server = fs.readFileSync(path.join(__dirname, '..', 'serve-static.cjs'), 'utf8');
 const standalonePage = fs.readFileSync(path.join(__dirname, '..', 'dist', 'ai-assistant.html'), 'utf8');
 const alicePortrait = fs.readFileSync(path.join(__dirname, '..', 'dist', 'ai-assistant-alice.jpg'));
+const assistantController = fs.readFileSync(path.join(__dirname, '..', '..', 'server', 'patch-src', 'com', 'zhiqu', 'server', 'assistant', 'AiAssistantController.java'), 'utf8');
+const assistantClient = fs.readFileSync(path.join(__dirname, '..', '..', 'server', 'patch-src', 'com', 'zhiqu', 'server', 'assistant', 'AiAssistantClient.java'), 'utf8');
+const assistantService = fs.readFileSync(path.join(__dirname, '..', '..', 'server', 'patch-src', 'com', 'zhiqu', 'server', 'assistant', 'AiAssistantService.java'), 'utf8');
+const generationRegistry = fs.readFileSync(path.join(__dirname, '..', '..', 'server', 'patch-src', 'com', 'zhiqu', 'server', 'assistant', 'AiAssistantGenerationRegistry.java'), 'utf8');
 
 assert.match(script, /if \(window\.__zhiquAiAssistantLoaded\) return;/, 'script must mount once');
 assert.match(script, /data-zq-ai-assistant-page/, 'page needs a unique mount marker');
@@ -60,6 +64,9 @@ assert.match(script, /\/api\/assistant\/feedback/, 'feedback endpoint must be us
 assert.match(script, /function refreshSession\(currentSession\)/, 'assistant API requests must refresh expired access tokens');
 assert.match(script, /response\.status === 401 && retryAfterRefresh !== false/, 'assistant API requests must retry once after a 401');
 assert.match(script, /state\.deletingId = id/, 'conversation deletion must expose an in-flight state');
+assert.match(script, /var cancel = state\.loading && state\.activeConversationId === id[\s\S]*cancelActiveGeneration\(\{ silent: true, skipRender: true \}\)/, 'conversation deletion must cancel only the deleted conversation in flight');
+assert.match(script, /state\.activeConversationId = null;[\s\S]*state\.messages = \[\];[\s\S]*state\.draft = '';[\s\S]*renderDialogue\(\);/, 'deleting the active conversation must leave a truthful empty state');
+assert.doesNotMatch(script.match(/function deleteConversation\(id\) \{[\s\S]*?\n  \}\n\n  function deleteMessage/)?.[0] || '', /return createConversation\(\)/, 'deleting a conversation must not silently create a replacement conversation');
 assert.match(script, /deleteButton\.disabled = !!state\.deletingId/, 'conversation deletion must prevent duplicate clicks');
 assert.match(script, /deleteButton\.textContent = deleting \? '\\u5220\\u9664\\u4e2d\\u2026'/, 'conversation deletion must show progress feedback');
 assert.match(script, /state\.authRequired = isAuthError\(error\)/, 'expired authentication must be distinguishable from other delete failures');
@@ -71,6 +78,11 @@ assert.match(script, /function titleFromFirstMessage\(message\)/, 'conversation 
 assert.match(script, /if \(firstUserMessage\) applyFirstMessageTitle\(userMessage\)/, 'first-message titles must update the sidebar after sending');
 assert.match(script, /state\.draft = ''/, 'draft should clear after the message is placed into the chat');
 assert.match(script, /AbortController/, 'stop generation must abort the active request');
+assert.match(script, /function cancelActiveGeneration\(options\)/, 'generation cancellation must use one frontend lifecycle helper');
+assert.match(script, /\/api\/assistant\/requests\/.*encodeURIComponent\(active\.requestId\)/, 'stop generation must call the authenticated backend cancellation endpoint');
+assert.match(script, /startGenerationRequest\(requestId, 'create-conversation'\)/, 'new-conversation greetings must register a cancellable request');
+assert.match(script, /body: \{ requestId: requestId, memoryEnabled: state\.memoryEnabled \}/, 'new conversations must send their cancellation request ID');
+assert.match(script, /stop\.disabled = state\.generationCancelPending/, 'stop generation must prevent duplicate cancellation clicks');
 assert.match(script, /var optimisticMessage = retryMessage \|\| \{/, 'sent text must enter the chat before generation starts');
 assert.match(script, /state\.messages\.push\(optimisticMessage\)/, 'sent text must render as an immediate user message');
 assert.match(script, /state\.latestMessageId = optimisticMessage\.id/, 'new user messages must receive a one-time animation marker');
@@ -112,7 +124,9 @@ assert.match(script, /navigator\.clipboard.*writeText/s, 'copy must prefer the C
 assert.match(script, /writeText\(text\)\.catch\(fallbackCopy\)/, 'copy must fall back when the Clipboard API rejects');
 assert.match(script, /document\.execCommand\('copy'\)/, 'copy must provide a legacy fallback');
 assert.match(script, /function regenerateMessage\(message\)/, 'assistant messages must support real regeneration');
-assert.match(script, /sendCurrentMessage\(source\.body, \{ actionMessageId: message\.id, source: 'regenerate' \}\)/, 'regeneration must reuse the real message endpoint');
+assert.match(script, /regenerateMessage\(message\)[\s\S]*?method: 'PUT'[\s\S]*?content: source\.body/, 'regeneration must update the original user exchange through the real backend');
+assert.match(script, /regenerateMessage\(message\)[\s\S]*?replaceEditedExchange\(source\.id, exchange\)/, 'regeneration must replace the existing assistant reply in place');
+assert.doesNotMatch(script, /sendCurrentMessage\(source\.body, \{[^}]*source: 'regenerate'/, 'regeneration must not append another user message through the send flow');
 assert.match(script, /function retryFailedMessage\(message\)/, 'failed messages must expose retry behavior');
 assert.match(script, /retryButton\.appendChild\(createMessageIcon\('refresh-cw'\)\)/, 'failed message retry must use a discoverable refresh icon');
 assert.match(script, /function createMessageIcon\(name\)/, 'message actions must use shared inline Lucide-style icons');
@@ -165,5 +179,10 @@ assert.match(server, /standaloneAssistant/, 'assistant route should use a standa
 assert.doesNotMatch(server, /tabsTransitionSource|tabsTransitionPatched/, 'static service must not rewrite the native tab transition');
 assert.match(standalonePage, /<body><\/body>/, 'standalone assistant document must not contain pre-rendered chat text');
 assert.match(server, /!standaloneAssistant && !standaloneSinglePlayer && !html\.includes/, 'standalone assistant document must not load unrelated recommendation enhancements');
+assert.match(assistantController, /@DeleteMapping\("\/requests\/\{requestId\}"\)/, 'backend must expose an authenticated cancellation endpoint');
+assert.match(assistantClient, /httpClient\.sendAsync/, 'provider generation must use a cancellable asynchronous HTTP request');
+assert.match(generationRegistry, /request\.cancel\(true\)/, 'server cancellation must cancel the active provider future');
+assert.match(assistantService, /generation\.throwIfCancelled\(\)[\s\S]*?insertAssistantMessage/, 'server must recheck cancellation before saving an assistant reply');
+assert.match(generationRegistry, /CANCEL_TTL_MILLIS = Duration\.ofMinutes\(1\)\.toMillis\(\)/, 'server must handle cancellation arriving before generation registration');
 
-console.log(JSON.stringify({ result: 'ok', checks: 120 }));
+console.log(JSON.stringify({ result: 'ok', checks: 135 }));

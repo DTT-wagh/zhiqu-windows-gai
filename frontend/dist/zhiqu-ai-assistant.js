@@ -29,6 +29,8 @@
     error: '',
     authRequired: false,
     abortController: null,
+    activeGeneration: null,
+    generationCancelPending: false,
     confirmDeleteId: null,
     deletingId: null,
     conversationSwitching: false,
@@ -183,6 +185,49 @@
       var value = character === 'x' ? random : (random & 3 | 8);
       return value.toString(16);
     });
+  }
+
+  function startGenerationRequest(requestId, kind) {
+    state.activeGeneration = {
+      requestId: requestId,
+      kind: kind || 'message'
+    };
+    state.generationCancelPending = false;
+  }
+
+  function finishGenerationRequest(requestId) {
+    if (state.activeGeneration && state.activeGeneration.requestId === requestId) {
+      state.activeGeneration = null;
+    }
+    state.generationCancelPending = false;
+  }
+
+  function cancelActiveGeneration(options) {
+    var settings = options || {};
+    var active = state.activeGeneration;
+    var controller = state.abortController;
+    if (!active) {
+      if (controller) controller.abort();
+      return Promise.resolve();
+    }
+    if (state.generationCancelPending) {
+      if (controller) controller.abort();
+      return Promise.resolve();
+    }
+    state.generationCancelPending = true;
+    if (!settings.skipRender) renderDialogue();
+    var cancellation = apiRequest('/api/assistant/requests/' + encodeURIComponent(active.requestId), {
+      method: 'DELETE'
+    }).catch(function (error) {
+      if (!settings.silent) {
+        state.error = messageForError(error, '\u65e0\u6cd5\u505c\u6b62\u670d\u52a1\u7aef\u751f\u6210');
+      }
+    }).finally(function () {
+      state.generationCancelPending = false;
+      if (!settings.skipRender && isAssistantRoute()) renderDialogue();
+    });
+    if (controller) controller.abort();
+    return cancellation;
   }
 
   function routeTo(href) {
@@ -681,8 +726,10 @@
     state.sidebarTouchStart = null;
     if (state.conversationTransitionTimer) window.clearTimeout(state.conversationTransitionTimer);
     state.conversationTransitionTimer = null;
-    if (state.abortController) state.abortController.abort();
+    cancelActiveGeneration({ silent: true, skipRender: true });
     state.abortController = null;
+    state.activeGeneration = null;
+    state.generationCancelPending = false;
     state.portraitVisible = false;
     state.portraitMode = '';
   }
@@ -704,8 +751,10 @@
     state.sidebarTouchStart = null;
     if (state.conversationTransitionTimer) window.clearTimeout(state.conversationTransitionTimer);
     state.conversationTransitionTimer = null;
-    if (state.abortController) state.abortController.abort();
+    cancelActiveGeneration({ silent: true, skipRender: true });
     state.abortController = null;
+    state.activeGeneration = null;
+    state.generationCancelPending = false;
     state.portraitVisible = false;
     state.portraitMode = '';
     state.leavingAssistant = true;
@@ -965,6 +1014,7 @@
     renderDialogue();
     var controller = new AbortController();
     state.abortController = controller;
+    startGenerationRequest(requestId, 'edit');
     apiRequest('/api/assistant/conversations/' + encodeURIComponent(conversationId) + '/messages/' + encodeURIComponent(message.id), {
       method: 'PUT',
       signal: controller.signal,
@@ -990,6 +1040,7 @@
       state.loading = false;
       state.loadingLabel = '';
       state.abortController = null;
+      finishGenerationRequest(requestId);
       renderDialogue();
       if (state.editingMessageId) focusInlineEditor();
     });
@@ -1003,9 +1054,47 @@
   function regenerateMessage(message) {
     if (state.loading) return;
     var source = previousUserMessage(message.id);
-    if (!source) return;
+    if (!source || source.id !== latestUserMessageId() || source.failed) return;
+    var requestId = createRequestId();
+    var conversationId = state.activeConversationId;
     state.regeneratingMessageId = message.id;
-    sendCurrentMessage(source.body, { actionMessageId: message.id, source: 'regenerate' });
+    state.loading = true;
+    state.loadingLabel = '\u6b63\u5728\u91cd\u65b0\u751f\u6210\u56de\u7b54';
+    state.error = '';
+    state.authRequired = false;
+    renderDialogue();
+    var controller = new AbortController();
+    state.abortController = controller;
+    startGenerationRequest(requestId, 'regenerate');
+    apiRequest('/api/assistant/conversations/' + encodeURIComponent(conversationId) + '/messages/' + encodeURIComponent(source.id), {
+      method: 'PUT',
+      signal: controller.signal,
+      body: {
+        requestId: requestId,
+        content: source.body,
+        memoryEnabled: state.memoryEnabled
+      }
+    }).then(function (exchange) {
+      replaceEditedExchange(source.id, exchange);
+      state.latestMessageId = exchange.assistantMessage.id;
+      state.followLatest = true;
+      state.regeneratingMessageId = null;
+      return apiRequest('/api/assistant/conversations').then(function (conversations) {
+        state.conversations = Array.isArray(conversations) ? conversations : state.conversations;
+      });
+    }).catch(function (error) {
+      state.regeneratingMessageId = null;
+      state.authRequired = error.name === 'AbortError' ? false : isAuthError(error);
+      state.error = error.name === 'AbortError'
+        ? ''
+        : messageForError(error, '\u91cd\u65b0\u751f\u6210\u5931\u8d25\uff0c\u539f\u56de\u590d\u5df2\u4fdd\u7559\u3002');
+    }).finally(function () {
+      state.loading = false;
+      state.loadingLabel = '';
+      state.abortController = null;
+      finishGenerationRequest(requestId);
+      renderDialogue();
+    });
   }
 
   function requestDeleteMessage(message) {
@@ -1124,14 +1213,16 @@
       var regenerateButton = document.createElement('button');
       var sourceMessage = previousUserMessage(message.id);
       var regenerating = state.regeneratingMessageId === message.id;
-      regenerateButton.type = 'button';
-      regenerateButton.className = 'zq-ai-message-action';
-      regenerateButton.disabled = !!state.loading || !sourceMessage;
-      regenerateButton.setAttribute('aria-busy', regenerating ? 'true' : 'false');
-      regenerateButton.setAttribute('aria-label', regenerating ? '\u91cd\u65b0\u751f\u6210\u4e2d' : '\u91cd\u65b0\u751f\u6210');
-      labelMessageAction(regenerateButton, regenerating ? 'loader-circle' : 'refresh-cw', regenerating ? '\u91cd\u65b0\u751f\u6210\u4e2d' : '\u91cd\u65b0\u751f\u6210');
-      regenerateButton.addEventListener('click', function () { regenerateMessage(message); });
-      actions.appendChild(regenerateButton);
+      if (sourceMessage && sourceMessage.id === latestUserMessageId()) {
+        regenerateButton.type = 'button';
+        regenerateButton.className = 'zq-ai-message-action';
+        regenerateButton.disabled = !!state.loading || !!sourceMessage.failed;
+        regenerateButton.setAttribute('aria-busy', regenerating ? 'true' : 'false');
+        regenerateButton.setAttribute('aria-label', regenerating ? '\u91cd\u65b0\u751f\u6210\u4e2d' : '\u91cd\u65b0\u751f\u6210');
+        labelMessageAction(regenerateButton, regenerating ? 'loader-circle' : 'refresh-cw', regenerating ? '\u91cd\u65b0\u751f\u6210\u4e2d' : '\u91cd\u65b0\u751f\u6210');
+        regenerateButton.addEventListener('click', function () { regenerateMessage(message); });
+        actions.appendChild(regenerateButton);
+      }
     }
     if (Array.isArray(message.sources) && message.sources.length) {
       var sourcesExpanded = !!state.sourceExpandedIds[message.id];
@@ -1362,7 +1453,9 @@
       var stop = document.createElement('button');
       stop.type = 'button';
       stop.className = 'zq-ai-stop';
-      stop.textContent = '\u505c\u6b62\u751f\u6210';
+      stop.disabled = state.generationCancelPending;
+      stop.textContent = state.generationCancelPending ? '\u6b63\u5728\u505c\u6b62' : '\u505c\u6b62\u751f\u6210';
+      stop.setAttribute('aria-busy', state.generationCancelPending ? 'true' : 'false');
       stop.addEventListener('click', stopGeneration);
       composer.appendChild(stop);
     }
@@ -1413,6 +1506,7 @@
 
   function createConversation(options) {
     if (state.loading || !session() || !state.config || !state.config.configured) return Promise.resolve();
+    var requestId = createRequestId();
     setPortraitVisible(false);
     resetEditingState();
     var animate = !!(options && options.animate);
@@ -1434,10 +1528,11 @@
     renderDialogue();
     var controller = new AbortController();
     state.abortController = controller;
+    startGenerationRequest(requestId, 'create-conversation');
     return apiRequest('/api/assistant/conversations', {
       method: 'POST',
       signal: controller.signal,
-      body: { memoryEnabled: state.memoryEnabled }
+      body: { requestId: requestId, memoryEnabled: state.memoryEnabled }
     }).then(function (created) {
       state.activeConversationId = created.conversation.id;
       state.messages = Array.isArray(created.messages) ? created.messages : [];
@@ -1445,11 +1540,11 @@
         state.conversations = Array.isArray(conversations) ? conversations : [];
       });
     }).catch(function (error) {
+      if (animate) {
+        state.activeConversationId = previousConversationId;
+        state.messages = previousMessages;
+      }
       if (error.name !== 'AbortError') {
-        if (animate) {
-          state.activeConversationId = previousConversationId;
-          state.messages = previousMessages;
-        }
         state.authRequired = isAuthError(error);
         state.error = messageForError(error, '\u65e0\u6cd5\u65b0\u5efa\u4f1a\u8bdd');
       }
@@ -1457,6 +1552,7 @@
       state.loading = false;
       state.loadingLabel = '';
       state.abortController = null;
+      finishGenerationRequest(requestId);
       renderDialogue();
     });
   }
@@ -1517,6 +1613,7 @@
     renderDialogue();
     var controller = new AbortController();
     state.abortController = controller;
+    startGenerationRequest(requestId, retryMessage ? 'retry' : 'message');
     apiRequest('/api/assistant/conversations/' + encodeURIComponent(state.activeConversationId) + '/messages', {
       method: 'POST',
       signal: controller.signal,
@@ -1553,29 +1650,44 @@
       state.loading = false;
       state.loadingLabel = '';
       state.abortController = null;
+      finishGenerationRequest(requestId);
       renderDialogue();
     });
   }
 
   function stopGeneration() {
-    if (state.abortController) state.abortController.abort();
+    cancelActiveGeneration();
   }
 
   function deleteConversation(id) {
-    if (state.loading || state.deletingId || state.deletingMessageId) return;
+    if (!id || state.deletingId || state.deletingMessageId) return;
     state.deletingId = id;
+    state.confirmDeleteId = null;
     state.error = '';
     state.authRequired = false;
     renderDialogue();
-    apiRequest('/api/assistant/conversations/' + encodeURIComponent(id), { method: 'DELETE' }).then(function () {
-      state.confirmDeleteId = null;
+
+    // A confirmation can arrive while a greeting/message request is still in
+    // flight. Cancel that request first so the deleted conversation cannot be
+    // recreated by a late model response, then perform the real delete.
+    var cancel = state.loading && state.activeConversationId === id
+      ? cancelActiveGeneration({ silent: true, skipRender: true })
+      : Promise.resolve();
+    cancel.then(function () {
+      return apiRequest('/api/assistant/conversations/' + encodeURIComponent(id), { method: 'DELETE' });
+    }).then(function () {
       state.deletingId = null;
       state.conversations = state.conversations.filter(function (item) { return item.id !== id; });
       if (state.activeConversationId === id) {
         state.activeConversationId = null;
         state.messages = [];
         if (state.conversations.length) return openConversation(state.conversations[0].id);
-        return createConversation();
+        // Keep a truthful empty state. Do not create a new model-backed
+        // conversation just to replace the one the user deleted.
+        state.draft = '';
+        state.followLatest = true;
+        renderDialogue();
+        return null;
       }
       renderConversations();
       return null;

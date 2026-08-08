@@ -11,6 +11,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -56,7 +59,10 @@ final class AiAssistantClient {
         return properties.model();
     }
 
-    ModelResult generate(String contextJson) {
+    ModelResult generate(
+            String contextJson,
+            AiAssistantGenerationRegistry.GenerationHandle generation
+    ) {
         if (!configured()) {
             throw new ApiException(
                     HttpStatus.SERVICE_UNAVAILABLE,
@@ -82,6 +88,7 @@ final class AiAssistantClient {
 
         ApiException lastFailure = null;
         for (int attempt = 0; attempt < 2; attempt += 1) {
+            generation.throwIfCancelled();
             try {
                 HttpRequest request = HttpRequest.newBuilder(chatEndpoint())
                         .timeout(REQUEST_TIMEOUT)
@@ -89,7 +96,13 @@ final class AiAssistantClient {
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                         .build();
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                CompletableFuture<HttpResponse<String>> providerRequest = httpClient.sendAsync(
+                        request,
+                        HttpResponse.BodyHandlers.ofString()
+                );
+                generation.attach(providerRequest);
+                HttpResponse<String> response = providerRequest.get();
+                generation.throwIfCancelled();
                 if (response.statusCode() >= 200 && response.statusCode() < 300) {
                     return parseResponse(response.body());
                 }
@@ -100,12 +113,22 @@ final class AiAssistantClient {
                         retryable ? "AI 服务暂时繁忙，请稍后重试" : "AI 服务返回了无效响应"
                 );
                 if (!retryable) break;
-            } catch (java.net.http.HttpTimeoutException error) {
-                lastFailure = new ApiException(HttpStatus.GATEWAY_TIMEOUT, "AI_TIMEOUT", "AI 响应超时，请重试");
+            } catch (CancellationException error) {
+                generation.throwIfCancelled();
+                throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_REQUEST_INTERRUPTED", "AI 请求已停止");
             } catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
                 throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_REQUEST_INTERRUPTED", "AI 请求已停止");
-            } catch (IOException | IllegalArgumentException error) {
+            } catch (ExecutionException error) {
+                Throwable cause = error.getCause();
+                if (cause instanceof java.net.http.HttpTimeoutException) {
+                    lastFailure = new ApiException(HttpStatus.GATEWAY_TIMEOUT, "AI_TIMEOUT", "AI 响应超时，请重试");
+                } else if (cause instanceof IOException || cause instanceof IllegalArgumentException) {
+                    lastFailure = new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_UNAVAILABLE", "当前无法连接 AI 服务");
+                } else {
+                    lastFailure = new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_UNAVAILABLE", "当前无法连接 AI 服务");
+                }
+            } catch (IllegalArgumentException error) {
                 lastFailure = new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_UNAVAILABLE", "当前无法连接 AI 服务");
             }
             if (attempt == 0) {
@@ -115,6 +138,7 @@ final class AiAssistantClient {
                     Thread.currentThread().interrupt();
                     throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_REQUEST_INTERRUPTED", "AI 请求已停止");
                 }
+                generation.throwIfCancelled();
             }
         }
         throw lastFailure == null

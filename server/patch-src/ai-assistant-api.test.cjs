@@ -31,6 +31,8 @@ async function register(prefix, nickname) {
 (async () => {
   const unauthenticated = await request('/api/assistant/config');
   assert.equal(unauthenticated.status, 401, 'assistant config must require login');
+  const unauthenticatedCancel = await request(`/api/assistant/requests/${randomUUID()}`, { method: 'DELETE' });
+  assert.equal(unauthenticatedCancel.status, 401, 'generation cancellation must require login');
 
   const alice = await register('assist', '小知');
   const bob = await register('assistb', '小问');
@@ -45,21 +47,23 @@ async function register(prefix, nickname) {
   assert.equal(liveRecommendations.status, 200);
   assert.ok(Array.isArray(liveRecommendations.payload));
   assert.ok(liveRecommendations.payload.every((item) => item.contentId && item.href === `/content/${item.contentId}`));
+  const idleCancel = await request(`/api/assistant/requests/${randomUUID()}`, { method: 'DELETE', token });
+  assert.equal(idleCancel.status, 204, 'cancelling a missing or completed request must be idempotent');
 
   if (!config.payload.configured) {
     const unavailable = await request('/api/assistant/conversations', {
-      method: 'POST', token, body: { memoryEnabled: false },
+      method: 'POST', token, body: { requestId: randomUUID(), memoryEnabled: false },
     });
     assert.equal(unavailable.status, 503, 'missing AI config must not return a fake greeting');
     assert.equal(unavailable.payload.code, 'AI_NOT_CONFIGURED');
     const empty = await request('/api/assistant/conversations', { token });
     assert.deepEqual(empty.payload, [], 'failed greeting must not create a conversation');
-    console.log(JSON.stringify({ result: 'ok', mode: 'not-configured', checks: 11 }));
+    console.log(JSON.stringify({ result: 'ok', mode: 'not-configured', checks: 13 }));
     return;
   }
 
   const created = await request('/api/assistant/conversations', {
-    method: 'POST', token, body: { memoryEnabled: true },
+    method: 'POST', token, body: { requestId: randomUUID(), memoryEnabled: true },
   });
   assert.equal(created.status, 201);
   assert.equal(created.payload.conversation.memoryEnabled, true, 'long-term memory must require and preserve explicit consent');
@@ -125,6 +129,19 @@ async function register(prefix, nickname) {
   assert.equal(repeatedEdit.status, 200);
   assert.equal(repeatedEdit.payload.userMessage.id, edited.payload.userMessage.id);
   assert.equal(repeatedEdit.payload.assistantMessage.id, edited.payload.assistantMessage.id);
+
+  const regenerateRequestId = randomUUID();
+  const regenerated = await request(`/api/assistant/conversations/${conversationId}/messages/${question.payload.userMessage.id}`, {
+    method: 'PUT',
+    token,
+    body: { requestId: regenerateRequestId, content: editedQuestionContent, memoryEnabled: true },
+  });
+  assert.equal(regenerated.status, 200, 'regeneration must use the existing user exchange');
+  assert.equal(regenerated.payload.userMessage.id, question.payload.userMessage.id, 'regeneration must not create another user message');
+  assert.equal(regenerated.payload.assistantMessage.id, question.payload.assistantMessage.id, 'regeneration must replace the existing assistant reply');
+  const afterRegenerate = await request(`/api/assistant/conversations/${conversationId}/messages`, { token });
+  assert.equal(afterRegenerate.payload.filter((message) => message.role === 'USER').length, 1, 'regeneration must keep one user message in the exchange');
+  assert.equal(afterRegenerate.payload.filter((message) => message.role === 'ASSISTANT').length, 2, 'regeneration must keep the greeting and one reply only');
 
   const isolatedEdit = await request(`/api/assistant/conversations/${conversationId}/messages/${question.payload.userMessage.id}`, {
     method: 'PUT',
@@ -194,7 +211,7 @@ async function register(prefix, nickname) {
   const missing = await request(`/api/assistant/conversations/${conversationId}/messages`, { token });
   assert.equal(missing.status, 404);
 
-  console.log(JSON.stringify({ result: 'ok', mode: 'configured', checks: 51 }));
+  console.log(JSON.stringify({ result: 'ok', mode: 'configured', checks: 58 }));
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

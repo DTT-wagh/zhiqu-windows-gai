@@ -93,7 +93,7 @@
     window.location.assign('/categories');
   }
 
-  function removeContentBackButton() {
+  function removeLegacyContentBackButton() {
     document.querySelectorAll('[data-zq-content-back="true"]').forEach((element) => {
       const host = element.parentElement;
       element.remove();
@@ -101,25 +101,39 @@
     });
   }
 
-  function ensureContentBackButton(contentId) {
+  function removeFallbackContentBackButton() {
+    document.querySelectorAll('[data-zq-content-native-back="true"]').forEach((element) => {
+      const host = element.parentElement;
+      element.remove();
+      host?.classList.remove('zq-content-native-back-row');
+    });
+  }
+
+  function hasNativeContentBackControl(host, heading) {
+    const headingIndex = Array.from(host.children).indexOf(heading);
+    return Array.from(host.children)
+      .slice(0, Math.max(0, headingIndex))
+      .some((element) => element.tagName === 'BUTTON' || element.tagName === 'A');
+  }
+
+  function ensureSingleContentBackControl(contentId) {
     if (!contentId) {
-      removeContentBackButton();
+      removeFallbackContentBackButton();
       return;
     }
-    if (document.querySelector('[data-zq-content-back="true"]')) return;
     const heading = findContentHeading();
     const host = heading?.parentElement;
-    if (!heading || !host) return;
-    const backButton = document.createElement('button');
-    backButton.type = 'button';
-    backButton.className = 'zq-content-back-button';
-    backButton.setAttribute('data-zq-content-back', 'true');
-    backButton.setAttribute('aria-label', '返回上一页');
-    backButton.setAttribute('title', '返回');
-    backButton.textContent = '←';
-    backButton.addEventListener('click', returnFromContent);
-    host.classList.add('zq-content-back-row');
-    host.insertBefore(backButton, heading);
+    if (!heading || !host || hasNativeContentBackControl(host, heading)) return;
+    const fallback = document.createElement('button');
+    fallback.type = 'button';
+    fallback.className = 'zq-content-native-back-button';
+    fallback.setAttribute('data-zq-content-native-back', 'true');
+    fallback.setAttribute('aria-label', '返回上一页');
+    fallback.setAttribute('title', '返回');
+    fallback.textContent = '←';
+    fallback.addEventListener('click', returnFromContent);
+    host.classList.add('zq-content-native-back-row');
+    host.insertBefore(fallback, heading);
   }
 
   function restoreStandaloneVideoCover() {
@@ -130,19 +144,35 @@
     });
   }
 
+  function normalizeAssetUrl(value) {
+    const source = String(value || '').trim();
+    if (!source) return '';
+    try { return new URL(source, window.location.href).href; } catch { return source; }
+  }
+
+  function coverImageUrl(cover) {
+    const image = cover?.querySelector('img');
+    return normalizeAssetUrl(image?.currentSrc || image?.src || '');
+  }
+
   function ensureVideoCoverLayout(video, contentId) {
     if (!video || !contentId) {
       restoreStandaloneVideoCover();
       return;
     }
-    const cover = document.querySelector('[data-expoimage="true"]');
-    if (!cover || cover.contains(video)) return;
-    const image = cover.querySelector('img');
-    const coverUrl = image?.currentSrc || image?.src || '';
-    if (!video.poster && coverUrl) video.poster = coverUrl;
-    cover.classList.add('zq-video-standalone-cover-hidden');
-    cover.setAttribute('data-zq-video-standalone-cover', 'true');
-    cover.setAttribute('aria-hidden', 'true');
+    const covers = Array.from(document.querySelectorAll('[data-expoimage="true"]'))
+      .filter((cover) => !cover.contains(video));
+    let coverUrl = normalizeAssetUrl(video.poster || video.getAttribute?.('poster'));
+    if (!coverUrl) coverUrl = coverImageUrl(covers[0]);
+    if (!coverUrl) return;
+    if (!video.poster) video.poster = coverUrl;
+    covers
+      .filter((cover) => coverImageUrl(cover) === coverUrl)
+      .forEach((cover) => {
+        cover.classList.add('zq-video-standalone-cover-hidden');
+        cover.setAttribute('data-zq-video-standalone-cover', 'true');
+        cover.setAttribute('aria-hidden', 'true');
+      });
   }
 
   function getEpisodeSource(content, supplied) {
@@ -246,10 +276,10 @@
     style.id = 'zq-video-next-style';
     style.textContent = `
       .zq-video-next-root { width: 100%; display: grid; gap: 12px; margin-top: 12px; color: #1b332b; }
-      .zq-content-back-row { display: flex !important; flex-direction: row !important; align-items: center !important; gap: 8px; min-height: 64px; }
-      .zq-content-back-button { box-sizing: border-box; display: grid; flex: 0 0 44px; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid #d5d9d3; border-radius: 8px; color: #243139; background: #fffdf8; font: inherit; font-size: 27px; line-height: 1; cursor: pointer; }
-      .zq-content-back-button:hover { border-color: #9ebeb2; background: #f3f7f3; }
-      .zq-content-back-button:focus-visible { border-color: #176b64; outline: 3px solid rgba(23, 107, 100, .18); outline-offset: 1px; }
+      .zq-content-native-back-row { display: flex !important; flex-direction: row !important; align-items: center !important; gap: 8px; min-height: 44px; }
+      .zq-content-native-back-button { box-sizing: border-box; display: grid; flex: 0 0 44px; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; color: #243139; background: transparent; font: inherit; font-size: 30px; line-height: 1; cursor: pointer; }
+      .zq-content-native-back-button:hover { background: rgba(36, 49, 57, .08); }
+      .zq-content-native-back-button:focus-visible { outline: 3px solid rgba(23, 107, 100, .28); outline-offset: 1px; }
       .zq-video-standalone-cover-hidden { display: none !important; }
       .zq-video-next-card, .zq-video-series { box-sizing: border-box; width: 100%; border: 1px solid #c8d5cc; border-radius: 10px; background: #fffdf7; box-shadow: 0 5px 15px rgba(28, 52, 43, .08); }
       .zq-video-next-card { display: grid; gap: 14px; padding: 18px; }
@@ -560,7 +590,8 @@
     scanTimer = 0;
     const contentId = currentContentId();
     addStyles();
-    ensureContentBackButton(contentId);
+    removeLegacyContentBackButton();
+    ensureSingleContentBackControl(contentId);
     const video = contentId ? document.querySelector('video') : null;
     ensureVideoCoverLayout(video, contentId);
     if (!video) {

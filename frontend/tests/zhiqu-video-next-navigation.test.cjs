@@ -163,24 +163,26 @@ function createPage(referrer) {
 }
 
 const returningPage = createPage('http://localhost:8082/categories');
-const backButton = returningPage.root.querySelector('[data-zq-content-back="true"]');
-assert.ok(backButton, 'content pages must render a back button');
+const backButton = returningPage.root.querySelector('[data-zq-content-native-back="true"]');
+assert.ok(backButton, 'content pages must have one unframed fallback back button when the native route control is unavailable');
+assert.equal(returningPage.root.querySelectorAll('[data-zq-content-back="true"]').length, 0, 'the framed legacy back button must not be injected');
 assert.equal(backButton.parentElement, returningPage.headingHost);
 assert.equal(returningPage.headingHost.children[0], backButton, 'the back button must be left of the heading');
 assert.equal(backButton.getAttribute('aria-label'), '返回上一页');
-assert.equal(returningPage.headingHost.classList.contains('zq-content-back-row'), true);
+assert.equal(backButton.classList.contains('zq-content-native-back-button'), true);
 backButton.click();
 assert.equal(returningPage.getBackCount(), 1, 'same-origin navigation must return to the previous page');
 assert.equal(returningPage.getAssignedUrl(), null);
 returningPage.observerCallback();
-assert.equal(returningPage.root.querySelectorAll('[data-zq-content-back="true"]').length, 1, 'repeated scans must not duplicate the button');
+assert.equal(returningPage.root.querySelectorAll('[data-zq-content-back="true"]').length, 0, 'repeated scans must not inject a framed back button');
+assert.equal(returningPage.root.querySelectorAll('[data-zq-content-native-back="true"]').length, 1, 'repeated scans must not duplicate the unframed fallback');
 
 const directPage = createPage('');
-directPage.root.querySelector('[data-zq-content-back="true"]').click();
+directPage.root.querySelector('[data-zq-content-native-back="true"]').click();
 assert.equal(directPage.getBackCount(), 0);
 assert.equal(directPage.getAssignedUrl(), '/categories', 'direct content links must return to the course catalog');
 
-console.log('video content navigation: ok');
+console.log('video native back control: ok');
 
 function createVideoCoverPage() {
   const root = new TestElement('html');
@@ -188,13 +190,27 @@ function createVideoCoverPage() {
   const body = new TestElement('body');
   const cover = new TestElement('div');
   const image = new TestElement('img');
+  const duplicateCover = new TestElement('div');
+  const duplicateImage = new TestElement('img');
+  const unrelatedCover = new TestElement('div');
+  const unrelatedImage = new TestElement('img');
   const video = new TestElement('video');
   const coverUrl = 'https://video.example/lesson-cover.jpg';
   cover.setAttribute('data-expoimage', 'true');
   image.src = coverUrl;
   image.currentSrc = coverUrl;
   cover.appendChild(image);
+  duplicateCover.setAttribute('data-expoimage', 'true');
+  duplicateImage.src = coverUrl;
+  duplicateImage.currentSrc = coverUrl;
+  duplicateCover.appendChild(duplicateImage);
+  unrelatedCover.setAttribute('data-expoimage', 'true');
+  unrelatedImage.src = 'https://video.example/other-cover.jpg';
+  unrelatedImage.currentSrc = unrelatedImage.src;
+  unrelatedCover.appendChild(unrelatedImage);
   body.appendChild(cover);
+  body.appendChild(duplicateCover);
+  body.appendChild(unrelatedCover);
   root.appendChild(head);
   root.appendChild(body);
 
@@ -244,7 +260,7 @@ function createVideoCoverPage() {
   };
   context.globalThis = context;
   vm.runInNewContext(source, context, { filename: 'zhiqu-video-next.js' });
-  return { cover, coverUrl, video };
+  return { cover, duplicateCover, unrelatedCover, coverUrl, video };
 }
 
 const coverPage = createVideoCoverPage();
@@ -252,5 +268,7 @@ assert.equal(coverPage.cover.classList.contains('zq-video-standalone-cover-hidde
 assert.equal(coverPage.cover.getAttribute('aria-hidden'), 'true');
 assert.equal(coverPage.cover.getAttribute('data-zq-video-standalone-cover'), 'true');
 assert.equal(coverPage.video.poster, coverPage.coverUrl, 'the player must keep the image as its loading poster');
+assert.equal(coverPage.duplicateCover.classList.contains('zq-video-standalone-cover-hidden'), true, 'all duplicate standalone covers must be hidden');
+assert.equal(coverPage.unrelatedCover.classList.contains('zq-video-standalone-cover-hidden'), false, 'unrelated images must remain available');
 
 console.log('video cover layout: ok');

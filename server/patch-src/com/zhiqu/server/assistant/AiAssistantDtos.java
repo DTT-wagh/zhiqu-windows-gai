@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 final class AiAssistantDtos {
     private AiAssistantDtos() {
@@ -18,9 +19,18 @@ final class AiAssistantDtos {
     ) {
     }
 
-    record CreateConversationRequest(Boolean memoryEnabled) {
+    record CreateConversationRequest(
+            @Size(max = 36) String requestId,
+            Boolean memoryEnabled
+    ) {
         boolean memoryEnabledOrDefault() {
             return Boolean.TRUE.equals(memoryEnabled);
+        }
+
+        String requestIdOrDefault() {
+            return requestId == null || requestId.isBlank()
+                    ? UUID.randomUUID().toString()
+                    : requestId;
         }
     }
 
