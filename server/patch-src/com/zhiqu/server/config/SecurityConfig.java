@@ -60,6 +60,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/community/images/**").permitAll()
                         // Published course videos are readable before login; account progress remains protected.
                         .requestMatchers(HttpMethod.GET, "/api/contents/*/playback").permitAll()
+                        // Single-player catalog and generated media are public; creating instances and progress stay protected.
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/single-player-games",
+                                "/api/single-player-games/",
+                                "/api/single-player-games/media/**"
+                        ).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories", "/api/contents", "/api/contents/**").permitAll()
                         .anyRequest().authenticated()
                 )

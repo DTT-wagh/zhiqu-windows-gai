@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -77,6 +78,16 @@ public class AiAssistantController {
             Authentication authentication
     ) {
         return service.sendMessage(authentication.getName(), conversationId, request);
+    }
+
+    @PutMapping("/conversations/{conversationId}/messages/{messageId}")
+    MessageExchangeResponse editMessage(
+            @PathVariable String conversationId,
+            @PathVariable String messageId,
+            @Valid @RequestBody SendMessageRequest request,
+            Authentication authentication
+    ) {
+        return service.editMessage(authentication.getName(), conversationId, messageId, request);
     }
 
     @GetMapping("/recommendations")

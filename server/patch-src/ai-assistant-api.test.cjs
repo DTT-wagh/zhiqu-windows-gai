@@ -71,12 +71,13 @@ async function register(prefix, nickname) {
   assert.equal(isolated.status, 404, 'another account must not read the conversation');
 
   const messageRequestId = randomUUID();
+  const originalQuestionContent = '请只根据学堂现有课程解释人工智能如何学习规律，并列出来源。';
   const question = await request(`/api/assistant/conversations/${conversationId}/messages`, {
     method: 'POST',
     token,
     body: {
       requestId: messageRequestId,
-      content: '请只根据学堂现有课程解释人工智能如何学习规律，并列出来源。',
+      content: originalQuestionContent,
       memoryEnabled: true,
     },
   });
@@ -97,6 +98,71 @@ async function register(prefix, nickname) {
   assert.equal(duplicate.status, 200);
   assert.equal(duplicate.payload.userMessage.id, question.payload.userMessage.id);
   assert.equal(duplicate.payload.assistantMessage.id, question.payload.assistantMessage.id);
+
+  const editedQuestionContent = '请根据学堂里的真实课程，用三句话重新解释人工智能怎样学习规律，并保留来源。';
+  const editRequestId = randomUUID();
+  const edited = await request(`/api/assistant/conversations/${conversationId}/messages/${question.payload.userMessage.id}`, {
+    method: 'PUT',
+    token,
+    body: { requestId: editRequestId, content: editedQuestionContent, memoryEnabled: true },
+  });
+  assert.equal(edited.status, 200, 'latest user message must be editable');
+  assert.equal(edited.payload.userMessage.id, question.payload.userMessage.id, 'editing must preserve the user message ID');
+  assert.equal(edited.payload.assistantMessage.id, question.payload.assistantMessage.id, 'editing must preserve the assistant message ID');
+  assert.equal(edited.payload.userMessage.body, editedQuestionContent, 'editing must persist the new user content');
+
+  const afterEdit = await request(`/api/assistant/conversations/${conversationId}/messages`, { token });
+  assert.equal(afterEdit.status, 200);
+  assert.equal(afterEdit.payload.filter((message) => message.id === question.payload.userMessage.id).length, 1, 'edited user message must not be duplicated');
+  assert.equal(afterEdit.payload.filter((message) => message.id === question.payload.assistantMessage.id).length, 1, 'regenerated assistant reply must replace the old reply');
+  assert.ok(afterEdit.payload.every((message) => message.body !== originalQuestionContent), 'the old user content must no longer be stored');
+
+  const repeatedEdit = await request(`/api/assistant/conversations/${conversationId}/messages/${question.payload.userMessage.id}`, {
+    method: 'PUT',
+    token,
+    body: { requestId: editRequestId, content: '重复请求不应再次改写内容', memoryEnabled: true },
+  });
+  assert.equal(repeatedEdit.status, 200);
+  assert.equal(repeatedEdit.payload.userMessage.id, edited.payload.userMessage.id);
+  assert.equal(repeatedEdit.payload.assistantMessage.id, edited.payload.assistantMessage.id);
+
+  const isolatedEdit = await request(`/api/assistant/conversations/${conversationId}/messages/${question.payload.userMessage.id}`, {
+    method: 'PUT',
+    token: bob.accessToken,
+    body: { requestId: randomUUID(), content: '另一个账号不能修改', memoryEnabled: false },
+  });
+  assert.equal(isolatedEdit.status, 404, 'another account must not edit the message');
+
+  const followUp = await request(`/api/assistant/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    token,
+    body: { requestId: randomUUID(), content: '谢谢，请记住刚才的解释方式。', memoryEnabled: true },
+  });
+  assert.equal(followUp.status, 200);
+  const nonLatestEdit = await request(`/api/assistant/conversations/${conversationId}/messages/${question.payload.userMessage.id}`, {
+    method: 'PUT',
+    token,
+    body: { requestId: randomUUID(), content: '这条已经不是最近消息', memoryEnabled: true },
+  });
+  assert.equal(nonLatestEdit.status, 409, 'older user messages must not be editable');
+  assert.equal(nonLatestEdit.payload.code, 'ASSISTANT_EDIT_NOT_LATEST');
+
+  const personaActivation = await request(`/api/assistant/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    token,
+    body: { requestId: randomUUID(), content: '心爱的少女在哪里？', memoryEnabled: true },
+  });
+  assert.equal(personaActivation.status, 200, 'hidden persona activation must use the real message endpoint');
+  assert.equal(personaActivation.payload.assistantMessage.body, '我爱你', 'activation reply must match the configured product response');
+  assert.equal(personaActivation.payload.assistantMessage.intent, 'CHAT');
+
+  const personaFollowUp = await request(`/api/assistant/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    token,
+    body: { requestId: randomUUID(), content: '你还在这里吗？', memoryEnabled: true },
+  });
+  assert.equal(personaFollowUp.status, 200, 'later messages must continue through the real model in the activated conversation');
+  assert.ok(personaFollowUp.payload.assistantMessage.body.trim().length > 0);
 
   const feedbackId = randomUUID();
   const feedback = await request('/api/assistant/feedback', {
@@ -128,7 +194,7 @@ async function register(prefix, nickname) {
   const missing = await request(`/api/assistant/conversations/${conversationId}/messages`, { token });
   assert.equal(missing.status, 404);
 
-  console.log(JSON.stringify({ result: 'ok', mode: 'configured', checks: 30 }));
+  console.log(JSON.stringify({ result: 'ok', mode: 'configured', checks: 51 }));
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -188,11 +188,17 @@ const server = http.createServer((request, response) => {
     }
     if (path.extname(file).toLowerCase() === '.html') {
       const standaloneAssistant = path.basename(file) === 'ai-assistant.html';
+      const standaloneSinglePlayer = path.basename(file) === 'single-player-game.html';
       const scripts = standaloneAssistant
         ? [apiConfigScript, aiAssistantScript]
+        : standaloneSinglePlayer
+          ? []
         : [apiConfigScript, guestAccessScript, avatarPreviewScript, birthdayWheelScript, profileEditFeedbackScript, gamesPlaceholderScript, askBodyScript, askNavigationScript, answerComposerScript, keyboardAvoidanceScript, friendsNavigationScript, friendsAuthGuardScript, socialChatScript, videoControlsScript, videoNextScript, aiAssistantScript];
       let html = body.toString('utf8');
-      if (!standaloneAssistant && !html.includes('src="/zhiqu-recommendations.js"')) {
+      if (standaloneSinglePlayer) {
+        html = html.replace('</head>', `${apiConfigScript}</head>`);
+      }
+      if (!standaloneAssistant && !standaloneSinglePlayer && !html.includes('src="/zhiqu-recommendations.js"')) {
         html = html.replace('</head>', `${recommendationsScript}</head>`);
       }
       body = Buffer.from(html.replace('</body>', `${scripts.join('')}</body>`));

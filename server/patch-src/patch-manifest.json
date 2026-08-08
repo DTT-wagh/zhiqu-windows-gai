@@ -20,6 +20,10 @@
     {
       "name": "ai-assistant",
       "script": "server/patch-src/patch-ai-assistant.cjs"
+    },
+    {
+      "name": "single-player-games",
+      "script": "server/patch-src/patch-single-player-games.cjs"
     }
   ]
 }

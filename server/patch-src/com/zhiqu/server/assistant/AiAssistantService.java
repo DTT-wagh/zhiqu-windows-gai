@@ -46,6 +46,8 @@ import tools.jackson.databind.node.ObjectNode;
 public class AiAssistantService {
     private static final int RECENT_MESSAGE_LIMIT = 12;
     private static final int RATE_LIMIT_PER_MINUTE = 12;
+    private static final String ALICE_TRIGGER = "心爱的少女在哪里？";
+    private static final String ALICE_ACTIVATION_REPLY = "我爱你";
     private static final Pattern EMAIL = Pattern.compile("(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}");
     private static final Pattern MOBILE = Pattern.compile("(?<!\\d)1[3-9]\\d{9}(?!\\d)");
     private static final Pattern CONTACT_ACCOUNT = Pattern.compile("(?i)(QQ|微信|vx|wechat)\\s*[:：号]?\\s*[a-z0-9_-]{5,20}");
@@ -96,7 +98,11 @@ public class AiAssistantService {
                 suppliedSources,
                 catalog
         );
-        ModelResult model = validateModelResult(client.generate(context), suppliedSources, catalog);
+        ModelResult model = validateModelResult(
+                applyPersonaReply(client.generate(context), false),
+                suppliedSources,
+                catalog
+        );
         Instant now = Instant.now();
         String title = "AI 助手 " + DateTimeFormatter.ofPattern("MM-dd HH:mm")
                 .withZone(ZoneId.of("Asia/Shanghai"))
@@ -168,7 +174,11 @@ public class AiAssistantService {
                 suppliedSources,
                 catalog
         );
-        ModelResult model = validateModelResult(client.generate(context), suppliedSources, catalog);
+        ModelResult model = validateModelResult(
+                applyPersonaReply(client.generate(context), ALICE_TRIGGER.equals(safeContent)),
+                suppliedSources,
+                catalog
+        );
         MessageView assistant;
         try {
             assistant = insertAssistantMessage(conversationId, userMessage.id(), model, suppliedSources, catalog, Instant.now());
@@ -176,6 +186,69 @@ public class AiAssistantService {
             assistant = findAssistantReply(userMessage.id());
             if (assistant == null) throw duplicate;
         }
+
+        updateConversationAfterMessage(userId, conversationId, safeContent, model.conversationSummary(), memoryEnabled);
+        persistMemory(userId, model.conversationSummary(), memoryEnabled);
+        return new MessageExchangeResponse(userMessage, assistant);
+    }
+
+    @Transactional
+    MessageExchangeResponse editMessage(
+            String userId,
+            String conversationId,
+            String messageId,
+            SendMessageRequest request
+    ) {
+        ConversationRow conversation = requireConversation(userId, conversationId);
+        MessageView userMessage = findUserMessage(conversationId, messageId);
+        if (userMessage == null) throw notFound("用户消息不存在");
+
+        MessageView existingRequest = findMessageByRequest(userId, request.requestId());
+        if (existingRequest != null) {
+            if (!existingRequest.id().equals(messageId)) {
+                throw new ApiException(HttpStatus.CONFLICT, "ASSISTANT_REQUEST_CONFLICT", "消息请求发生冲突，请重试");
+            }
+            MessageView existingReply = findAssistantReply(messageId);
+            if (existingReply != null) return new MessageExchangeResponse(existingRequest, existingReply);
+        }
+
+        String latestUserMessageId = latestUserMessageId(conversationId);
+        if (!messageId.equals(latestUserMessageId)) {
+            throw new ApiException(HttpStatus.CONFLICT, "ASSISTANT_EDIT_NOT_LATEST", "只能编辑最近一条用户消息");
+        }
+
+        enforceRateLimit(userId);
+        String safeContent = sanitizeUserContent(request.content());
+        boolean memoryEnabled = request.memoryEnabledOrDefault();
+        jdbc.update("""
+                UPDATE assistant_messages
+                SET body = ?, request_id = ?, safety_status = 'NOT_CHECKED', safety_reason = NULL
+                WHERE id = ? AND conversation_id = ? AND role = 'USER'
+                """, safeContent, request.requestId(), messageId, conversationId);
+        userMessage = findUserMessage(conversationId, messageId);
+
+        List<MessageView> recentMessages = recentMessagesForEdit(conversationId, messageId);
+        List<SourceCandidate> suppliedSources = loadSourceCandidates();
+        List<ContentCandidate> catalog = loadCatalog(userId);
+        String context = buildContext(
+                "EDIT",
+                userId,
+                conversationId,
+                conversation.summary(),
+                memoryEnabled,
+                recentMessages,
+                suppliedSources,
+                catalog
+        );
+        ModelResult model = validateModelResult(client.generate(context), suppliedSources, catalog);
+        MessageView assistant = replaceAssistantMessage(
+                conversationId,
+                messageId,
+                model,
+                suppliedSources,
+                catalog,
+                Instant.now()
+        );
 
         updateConversationAfterMessage(userId, conversationId, safeContent, model.conversationSummary(), memoryEnabled);
         persistMemory(userId, model.conversationSummary(), memoryEnabled);
@@ -319,6 +392,24 @@ public class AiAssistantService {
                 """, (rs, rowNum) -> messageView(rs), userMessageId).stream().findFirst().orElse(null);
     }
 
+    private MessageView findUserMessage(String conversationId, String messageId) {
+        return jdbc.query("""
+                SELECT id, conversation_id, role, body, intent, sources_json, recommendations_json,
+                       safety_status, safety_reason, request_id, created_at
+                FROM assistant_messages
+                WHERE id = ? AND conversation_id = ? AND role = 'USER'
+                """, (rs, rowNum) -> messageView(rs), messageId, conversationId).stream().findFirst().orElse(null);
+    }
+
+    private String latestUserMessageId(String conversationId) {
+        return jdbc.query("""
+                SELECT id FROM assistant_messages
+                WHERE conversation_id = ? AND role = 'USER'
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """, (rs, rowNum) -> rs.getString("id"), conversationId).stream().findFirst().orElse(null);
+    }
+
     private List<MessageView> recentMessages(String conversationId) {
         List<MessageView> reversed = jdbc.query("""
                 SELECT id, conversation_id, role, body, intent, sources_json, recommendations_json,
@@ -328,6 +419,20 @@ public class AiAssistantService {
                 ORDER BY created_at DESC, id DESC
                 LIMIT ?
                 """, (rs, rowNum) -> messageView(rs), conversationId, RECENT_MESSAGE_LIMIT);
+        java.util.Collections.reverse(reversed);
+        return reversed;
+    }
+
+    private List<MessageView> recentMessagesForEdit(String conversationId, String userMessageId) {
+        List<MessageView> reversed = jdbc.query("""
+                SELECT id, conversation_id, role, body, intent, sources_json, recommendations_json,
+                       safety_status, safety_reason, request_id, created_at
+                FROM assistant_messages
+                WHERE conversation_id = ?
+                  AND (reply_to_message_id IS NULL OR reply_to_message_id <> ?)
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """, (rs, rowNum) -> messageView(rs), conversationId, userMessageId, RECENT_MESSAGE_LIMIT);
         java.util.Collections.reverse(reversed);
         return reversed;
     }
@@ -367,6 +472,45 @@ public class AiAssistantService {
         );
     }
 
+    private MessageView replaceAssistantMessage(
+            String conversationId,
+            String replyToMessageId,
+            ModelResult model,
+            List<SourceCandidate> suppliedSources,
+            List<ContentCandidate> catalog,
+            Instant createdAt
+    ) {
+        MessageView existing = findAssistantReply(replyToMessageId);
+        if (existing == null) {
+            return insertAssistantMessage(conversationId, replyToMessageId, model, suppliedSources, catalog, createdAt);
+        }
+
+        Map<String, SourceCandidate> sourceMap = suppliedSources.stream()
+                .collect(Collectors.toMap(SourceCandidate::id, Function.identity(), (left, right) -> left, LinkedHashMap::new));
+        Map<String, ContentCandidate> contentMap = catalog.stream()
+                .collect(Collectors.toMap(ContentCandidate::id, Function.identity(), (left, right) -> left, LinkedHashMap::new));
+        List<SourceView> sources = model.sourceIds().stream()
+                .map(sourceMap::get).filter(java.util.Objects::nonNull).map(SourceCandidate::toView).toList();
+        List<RecommendationView> recommendations = model.recommendations().stream()
+                .filter(item -> contentMap.containsKey(item.contentId()))
+                .map(item -> contentMap.get(item.contentId()).toRecommendation(item.reason()))
+                .toList();
+        String safeReply = redactPrivacy(model.reply());
+
+        jdbc.update("DELETE FROM assistant_recommendation_events WHERE message_id = ?", existing.id());
+        jdbc.update("""
+                UPDATE assistant_messages
+                SET body = ?, intent = ?, sources_json = ?, recommendations_json = ?,
+                    safety_status = ?, safety_reason = ?, created_at = ?
+                WHERE id = ? AND conversation_id = ? AND role = 'ASSISTANT'
+                """, safeReply, model.intent(), json(sources), json(recommendations), model.safetyStatus(),
+                blankToNull(model.safetyReason()), Timestamp.from(createdAt), existing.id(), conversationId);
+        return new MessageView(
+                existing.id(), conversationId, "ASSISTANT", safeReply, model.intent(), sources, recommendations,
+                new SafetyView(model.safetyStatus(), model.safetyReason()), null, createdAt
+        );
+    }
+
     private ModelResult validateModelResult(
             ModelResult model,
             List<SourceCandidate> suppliedSources,
@@ -388,6 +532,19 @@ public class AiAssistantService {
         return new ModelResult(
                 model.reply(), model.intent(), validSourceIds, validRecommendations,
                 model.safetyStatus(), model.safetyReason(), redactPrivacy(model.conversationSummary())
+        );
+    }
+
+    private ModelResult applyPersonaReply(ModelResult model, boolean activationMessage) {
+        if (!activationMessage) return model;
+        return new ModelResult(
+                ALICE_ACTIVATION_REPLY,
+                "CHAT",
+                List.of(),
+                List.of(),
+                "SAFE",
+                "",
+                model.conversationSummary()
         );
     }
 
@@ -419,6 +576,13 @@ public class AiAssistantService {
         root.put("conversationSummary", nullToEmpty(summary));
         root.put("longTermMemoryAllowed", memoryEnabled);
         root.put("longTermMemory", memoryEnabled ? loadLongTermMemory(userId) : "");
+        boolean alicePersona = hasAlicePersona(conversationId);
+        ObjectNode persona = root.putObject("persona");
+        persona.put("active", alicePersona);
+        persona.put("activationMessage", latestUserMessageMatches(recentMessages, ALICE_TRIGGER));
+        persona.put("activationReply", ALICE_ACTIVATION_REPLY);
+        persona.put("tone", "温柔、神秘、略带童话感；句子自然简洁，关心用户但不制造依赖或排他关系");
+        persona.put("copyrightBoundary", "只使用上述抽象语气特征，不模仿或声称自己是任何现有作品角色，不复述原作台词、身份、剧情或世界观");
         root.set("profile", objectMapper.valueToTree(loadProfile(userId)));
         root.set("learningState", objectMapper.valueToTree(loadLearningState(userId)));
 
@@ -459,6 +623,22 @@ public class AiAssistantService {
         } catch (Exception error) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "AI_CONTEXT_ENCODING_FAILED", "无法准备 AI 上下文");
         }
+    }
+
+    private boolean hasAlicePersona(String conversationId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM assistant_messages
+                WHERE conversation_id = ? AND role = 'USER' AND body = ?
+                """, Integer.class, conversationId, ALICE_TRIGGER);
+        return count != null && count > 0;
+    }
+
+    private boolean latestUserMessageMatches(List<MessageView> messages, String expected) {
+        for (int index = messages.size() - 1; index >= 0; index -= 1) {
+            MessageView message = messages.get(index);
+            if ("USER".equals(message.role())) return expected.equals(message.body());
+        }
+        return false;
     }
 
     private Map<String, Object> loadProfile(String userId) {
