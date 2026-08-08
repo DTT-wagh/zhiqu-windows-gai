@@ -109,11 +109,25 @@
     });
   }
 
-  function hasNativeContentBackControl(host, heading) {
-    const headingIndex = Array.from(host.children).indexOf(heading);
-    return Array.from(host.children)
-      .slice(0, Math.max(0, headingIndex))
-      .some((element) => element.tagName === 'BUTTON' || element.tagName === 'A');
+  function isVisibleBackControl(element, heading) {
+    const label = String(element.getAttribute?.('aria-label') || '').trim().toLowerCase();
+    if (!label.includes('back') && !label.includes('返回')) return false;
+    if (element.getAttribute?.('data-zq-content-native-back') === 'true') return false;
+    if (element.getAttribute?.('data-zq-content-back') === 'true') return false;
+    const elementRect = element.getBoundingClientRect?.();
+    const headingRect = heading.getBoundingClientRect?.();
+    if (!elementRect || !headingRect) return true;
+    if (elementRect.width <= 0 || elementRect.height <= 0) return false;
+    return elementRect.top <= headingRect.bottom + 16;
+  }
+
+  function hasNativeContentBackControl(heading) {
+    const candidates = new Set([
+      ...document.querySelectorAll('a'),
+      ...document.querySelectorAll('button'),
+      ...document.querySelectorAll('[role="button"]'),
+    ]);
+    return Array.from(candidates).some((element) => isVisibleBackControl(element, heading));
   }
 
   function ensureSingleContentBackControl(contentId) {
@@ -123,7 +137,12 @@
     }
     const heading = findContentHeading();
     const host = heading?.parentElement;
-    if (!heading || !host || hasNativeContentBackControl(host, heading)) return;
+    if (!heading || !host) return;
+    if (hasNativeContentBackControl(heading)) {
+      removeFallbackContentBackButton();
+      return;
+    }
+    if (document.querySelector('[data-zq-content-native-back="true"]')) return;
     const fallback = document.createElement('button');
     fallback.type = 'button';
     fallback.className = 'zq-content-native-back-button';

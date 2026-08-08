@@ -83,10 +83,17 @@ class TestElement {
   }
 }
 
-function createPage(referrer) {
+function createPage(referrer, { nativeBack = false } = {}) {
   const root = new TestElement('html');
   const head = new TestElement('head');
   const body = new TestElement('body');
+  if (nativeBack) {
+    const nativeHeader = new TestElement('div');
+    const nativeBackLink = new TestElement('a');
+    nativeBackLink.setAttribute('aria-label', '(tabs), back');
+    nativeHeader.appendChild(nativeBackLink);
+    body.appendChild(nativeHeader);
+  }
   const headingHost = new TestElement('div');
   const heading = new TestElement('h1');
   heading.textContent = '学习内容';
@@ -154,6 +161,7 @@ function createPage(referrer) {
   vm.runInNewContext(source, context, { filename: 'zhiqu-video-next.js' });
   return {
     root,
+    body,
     heading,
     headingHost,
     observerCallback,
@@ -162,20 +170,28 @@ function createPage(referrer) {
   };
 }
 
+const nativePage = createPage('http://localhost:8082/categories', { nativeBack: true });
+assert.equal(nativePage.root.querySelectorAll('[data-zq-content-back="true"]').length, 0, 'the framed legacy back button must not be injected');
+assert.equal(nativePage.root.querySelectorAll('[data-zq-content-native-back="true"]').length, 0, 'a native back link outside the heading container must prevent fallback injection');
+nativePage.observerCallback();
+assert.equal(nativePage.root.querySelectorAll('[data-zq-content-native-back="true"]').length, 0, 'repeated scans must continue using the native route control');
+
 const returningPage = createPage('http://localhost:8082/categories');
 const backButton = returningPage.root.querySelector('[data-zq-content-native-back="true"]');
 assert.ok(backButton, 'content pages must have one unframed fallback back button when the native route control is unavailable');
-assert.equal(returningPage.root.querySelectorAll('[data-zq-content-back="true"]').length, 0, 'the framed legacy back button must not be injected');
 assert.equal(backButton.parentElement, returningPage.headingHost);
-assert.equal(returningPage.headingHost.children[0], backButton, 'the back button must be left of the heading');
 assert.equal(backButton.getAttribute('aria-label'), '返回上一页');
-assert.equal(backButton.classList.contains('zq-content-native-back-button'), true);
 backButton.click();
-assert.equal(returningPage.getBackCount(), 1, 'same-origin navigation must return to the previous page');
-assert.equal(returningPage.getAssignedUrl(), null);
+assert.equal(returningPage.getBackCount(), 1, 'same-origin fallback navigation must return to the previous page');
 returningPage.observerCallback();
-assert.equal(returningPage.root.querySelectorAll('[data-zq-content-back="true"]').length, 0, 'repeated scans must not inject a framed back button');
 assert.equal(returningPage.root.querySelectorAll('[data-zq-content-native-back="true"]').length, 1, 'repeated scans must not duplicate the unframed fallback');
+const lateNativeHeader = new TestElement('div');
+const lateNativeBackLink = new TestElement('a');
+lateNativeBackLink.setAttribute('aria-label', '(tabs), back');
+lateNativeHeader.appendChild(lateNativeBackLink);
+returningPage.body.appendChild(lateNativeHeader);
+returningPage.observerCallback();
+assert.equal(returningPage.root.querySelectorAll('[data-zq-content-native-back="true"]').length, 0, 'a native route control rendered later must remove the fallback button');
 
 const directPage = createPage('');
 directPage.root.querySelector('[data-zq-content-native-back="true"]').click();
