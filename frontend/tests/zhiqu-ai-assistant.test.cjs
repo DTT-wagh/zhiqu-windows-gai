@@ -181,6 +181,9 @@ assert.match(standalonePage, /<body><\/body>/, 'standalone assistant document mu
 assert.match(server, /!standaloneAssistant && !standaloneSinglePlayer && !html\.includes/, 'standalone assistant document must not load unrelated recommendation enhancements');
 assert.match(assistantController, /@DeleteMapping\("\/requests\/\{requestId\}"\)/, 'backend must expose an authenticated cancellation endpoint');
 assert.match(assistantClient, /httpClient\.sendAsync/, 'provider generation must use a cancellable asynchronous HTTP request');
+assert.match(assistantClient, /private ApiException providerFailure\(int statusCode, String responseBody\)/, 'provider failures must be classified before reaching the generic UI message');
+assert.match(assistantClient, /AI_MODEL_ACCESS_DENIED/, '403 provider responses must expose a model authorization error');
+assert.match(assistantClient, /当前 AI 模型未获授权/, 'model authorization failures must tell the user what to configure');
 assert.match(generationRegistry, /request\.cancel\(true\)/, 'server cancellation must cancel the active provider future');
 assert.match(assistantService, /generation\.throwIfCancelled\(\)[\s\S]*?insertAssistantMessage/, 'server must recheck cancellation before saving an assistant reply');
 assert.match(generationRegistry, /CANCEL_TTL_MILLIS = Duration\.ofMinutes\(1\)\.toMillis\(\)/, 'server must handle cancellation arriving before generation registration');

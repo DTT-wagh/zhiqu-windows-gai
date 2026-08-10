@@ -76,7 +76,7 @@ public class SinglePlayerGameController {
             Authentication authentication
     ) {
         return ResponseEntity.status(HttpStatus.ACCEPTED)
-                .body(service.retryGeneration(authentication.getName(), instanceId, request, false));
+                .body(service.retryGeneration(authentication.getName(), instanceId, request));
     }
 
     @PostMapping("/instances/{instanceId}/regenerate")
@@ -86,7 +86,7 @@ public class SinglePlayerGameController {
             Authentication authentication
     ) {
         return ResponseEntity.status(HttpStatus.ACCEPTED)
-                .body(service.retryGeneration(authentication.getName(), instanceId, request, true));
+                .body(service.regenerate(authentication.getName(), instanceId, request));
     }
 
     @PostMapping("/instances/{instanceId}/finish")

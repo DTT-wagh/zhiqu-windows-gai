@@ -57,8 +57,13 @@
 
   var params = new URLSearchParams(global.location.search);
   var gameCode = catalog.games[params.get('game')] ? params.get('game') : 'prompt-writer';
-  var levelNo = clampLevel(params.get('level'));
+  var levelNo = 1;
   var game = catalog.get(gameCode);
+  if (params.has('level')) {
+    var canonicalUrl = new URL(global.location.href);
+    canonicalUrl.searchParams.delete('level');
+    global.history.replaceState({}, '', canonicalUrl.pathname + canonicalUrl.search);
+  }
   var machine = createStateMachine(STATES.INTRO);
   var state = {
     instance: null,
@@ -79,11 +84,6 @@
     statusNote: ''
   };
 
-  function clampLevel(value) {
-    var number = Number(value || 1);
-    return Number.isInteger(number) && number >= 1 && number <= 12 ? number : 1;
-  }
-
   function readStorage(key) {
     try { return global.localStorage.getItem(key); } catch (error) { return null; }
   }
@@ -97,7 +97,11 @@
   }
 
   function activeKey() {
-    return 'zhiqu.single-player.active.' + gameCode + '.' + levelNo;
+    return 'zhiqu.single-player.active.' + gameCode;
+  }
+
+  function legacyActiveKey() {
+    return activeKey() + '.1';
   }
 
   function demoKey(instanceId) {
@@ -134,14 +138,17 @@
     var title = document.createElement('strong');
     title.textContent = game.title;
     var detail = document.createElement('span');
-    detail.textContent = '第 ' + levelNo + ' 关 · ' + game.levels[levelNo - 1].learningGoal;
+    detail.textContent = game.learningGoal;
     heading.appendChild(title);
     heading.appendChild(detail);
     var progress = document.createElement('div');
     progress.className = 'sp-progress-label';
     progress.textContent = machine.state === STATES.ROUND_ACTIVE || machine.state === STATES.EVALUATING || machine.state === STATES.FEEDBACK
-      ? '第 ' + Math.min(3, (state.instance ? state.instance.currentRound : 0) + 1) + ' / 3 轮'
-      : machine.state === STATES.RESULT ? '结算' : '12 关可选';
+      ? Math.min(3, (state.instance ? state.instance.currentRound : 0) + 1) + ' / 3'
+      : machine.state === STATES.GENERATING ? '生成'
+        : machine.state === STATES.DEMO ? '示范'
+          : machine.state === STATES.RESULT ? '完成'
+            : machine.state === STATES.FAILED ? '未生成' : '介绍';
     header.appendChild(back);
     header.appendChild(heading);
     header.appendChild(progress);
@@ -173,7 +180,7 @@
     live.textContent = state.statusNote;
     page.appendChild(live);
     root.appendChild(page);
-    document.title = game.title + ' · 第 ' + levelNo + ' 关 | 智趣 AI 学堂';
+    document.title = game.title + ' | 智趣 AI 学堂';
   }
 
   function renderIntro(main) {
@@ -187,7 +194,7 @@
     var title = document.createElement('h1');
     title.textContent = game.title;
     var description = document.createElement('p');
-    description.textContent = game.description + ' 每关有一次示范、三轮挑战和一条本局生成的发现。';
+    description.textContent = game.description + ' 本局包含一次示范、三轮挑战和一次结算。';
     head.appendChild(kicker);
     head.appendChild(title);
     head.appendChild(description);
@@ -196,7 +203,7 @@
     var loop = document.createElement('div');
     loop.className = 'sp-loop';
     [
-      ['01', '看原始信息'], ['02', '看 AI 提取'], ['03', '和自己比较'], ['04', '改变一个信息'], ['05', '发现 AI 还不知道什么']
+      ['01', '看 AI 提取'], ['02', '和自己比'], ['03', '改一个信息']
     ].forEach(function (item) {
       var step = document.createElement('span');
       var number = document.createElement('b');
@@ -207,34 +214,17 @@
     });
     intro.appendChild(loop);
 
-    var levelSection = document.createElement('section');
-    var heading = document.createElement('h2');
-    heading.className = 'sp-section-title';
-    heading.textContent = '选择关卡';
-    levelSection.appendChild(heading);
-    var grid = document.createElement('div');
-    grid.className = 'sp-level-grid';
-    game.levels.forEach(function (level) {
-      var button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'sp-level';
-      button.dataset.current = String(level.levelNo === levelNo);
-      button.dataset.complete = String(!!state.progress[gameCode + ':' + level.levelNo]);
-      var number = document.createElement('span');
-      number.className = 'sp-level-number';
-      number.textContent = '第 ' + level.levelNo + ' 关';
-      var goal = document.createElement('strong');
-      goal.textContent = level.learningGoal;
-      var type = document.createElement('small');
-      type.textContent = level.type + ' · 约 ' + level.estimatedMinutes + ' 分钟';
-      button.appendChild(number);
-      button.appendChild(goal);
-      button.appendChild(type);
-      button.addEventListener('click', function () { selectLevel(level.levelNo); });
-      grid.appendChild(button);
-    });
-    levelSection.appendChild(grid);
-    intro.appendChild(levelSection);
+    var completion = document.createElement('section');
+    completion.className = 'sp-completion';
+    var completionLabel = document.createElement('strong');
+    completionLabel.textContent = state.progress[gameCode] ? '已完成' : '未完成';
+    var completionCopy = document.createElement('span');
+    completionCopy.textContent = state.progress[gameCode]
+      ? '可以再玩一次，获得新的实时内容。'
+      : '约 ' + game.estimatedMinutes + ' 分钟，完成一次即记录本游戏进度。';
+    completion.appendChild(completionLabel);
+    completion.appendChild(completionCopy);
+    intro.appendChild(completion);
 
     if (state.showAgePicker) intro.appendChild(agePicker());
     var actions = document.createElement('div');
@@ -242,14 +232,14 @@
     var start = document.createElement('button');
     start.type = 'button';
     start.className = 'sp-primary';
-    start.textContent = api.session() ? '开始第 ' + levelNo + ' 关' : '登录后开始';
+    start.textContent = api.session() ? '开始游戏' : '登录后开始';
     start.addEventListener('click', startNew);
     actions.appendChild(start);
     var note = document.createElement('span');
     note.className = 'sp-hint-text';
     note.textContent = api.session()
       ? '开局后由 AI 实时生成，本局有效期 24 小时。'
-      : '游客可查看介绍与全部关卡目录；生成、进度和奖励需要登录。';
+      : '游客可查看游戏介绍；生成、进度和奖励需要登录。';
     actions.appendChild(note);
     intro.appendChild(actions);
     main.appendChild(intro);
@@ -298,7 +288,7 @@
       ? '正在生成场景、图片，并让视觉模型重新核对画面。'
       : gameCode === 'route-and-conditions'
         ? '正在生成抽象图，随后由路线程序检查每个数字和条件。'
-        : '正在根据本关目标和年龄段创建新的观察材料。';
+        : '正在根据本局目标和年龄段创建新的观察材料。';
     wrap.appendChild(loader);
     wrap.appendChild(title);
     wrap.appendChild(copy);
@@ -337,17 +327,9 @@
     var begin = document.createElement('button');
     begin.type = 'button';
     begin.className = 'sp-primary';
-    begin.textContent = '开始三轮挑战';
+    begin.textContent = '我看懂了';
     begin.addEventListener('click', beginRounds);
     actions.appendChild(begin);
-    if (levelNo === 12) {
-      var change = document.createElement('button');
-      change.type = 'button';
-      change.className = 'sp-secondary';
-      change.textContent = '换一个';
-      change.addEventListener('click', regenerate);
-      actions.appendChild(change);
-    }
     main.appendChild(actions);
   }
 
@@ -514,6 +496,25 @@
     band.appendChild(limitation);
     main.appendChild(band);
 
+    var summary = document.createElement('section');
+    summary.className = 'sp-result-summary';
+    [
+      ['我观察到的证据', result.evidence || result.discovery || '我根据本局的原始信息完成了判断。'],
+      ['AI 提取正确的地方', result.aiCorrect || '本局已核对 AI 能从原始信息中识别的内容。'],
+      ['AI 漏掉或不确定的地方', result.uncertain || result.limitation || 'AI 还有未知或可能看错的部分。'],
+      ['改变一个信息后', result.change || result.discovery || '只改变一个信息，AI 的判断可能随之变化。']
+    ].forEach(function (item) {
+      var row = document.createElement('div');
+      var label = document.createElement('strong');
+      var copy = document.createElement('p');
+      label.textContent = item[0];
+      copy.textContent = item[1];
+      row.appendChild(label);
+      row.appendChild(copy);
+      summary.appendChild(row);
+    });
+    main.appendChild(summary);
+
     if (!state.finish) {
       var label = document.createElement('label');
       label.className = 'sp-workspace';
@@ -548,23 +549,23 @@
     var reward = document.createElement('section');
     reward.className = 'sp-reward';
     var rewardText = state.finish.reward
-      ? '本关奖励：' + state.finish.reward.awardedXp + ' XP' + (state.finish.reward.capped ? '（今日奖励已达上限）' : '')
-      : '本关进度已经保存。';
+      ? '本游戏奖励：' + state.finish.reward.awardedXp + ' XP' + (state.finish.reward.capped ? '（今日奖励已达上限）' : '')
+      : '本游戏进度已经保存。';
     reward.textContent = rewardText;
     main.appendChild(reward);
     var completedActions = document.createElement('div');
     completedActions.className = 'sp-actions';
-    var lobby = document.createElement('a');
-    lobby.className = 'sp-primary';
-    lobby.href = '/community?section=games';
-    lobby.textContent = '返回游戏大厅';
     var again = document.createElement('button');
     again.type = 'button';
-    again.className = 'sp-secondary';
-    again.textContent = levelNo === 12 ? '换一个新实例' : '再生成一局';
+    again.className = 'sp-primary';
+    again.textContent = '再玩一次';
     again.addEventListener('click', restartFromResult);
-    completedActions.appendChild(lobby);
     completedActions.appendChild(again);
+    var lobby = document.createElement('a');
+    lobby.className = 'sp-secondary';
+    lobby.href = '/community?section=games';
+    lobby.textContent = '返回大厅';
+    completedActions.appendChild(lobby);
     main.appendChild(completedActions);
   }
 
@@ -573,7 +574,7 @@
     loading.className = 'sp-loading';
     var wrap = document.createElement('div');
     var title = document.createElement('h1');
-    title.textContent = '本关内容暂时生成失败';
+    title.textContent = '本局内容暂时生成失败';
     var copy = document.createElement('p');
     copy.textContent = '没有使用固定题目代替这次 AI 内容。可以重新生成，或先返回大厅。';
     var code = document.createElement('p');
@@ -600,23 +601,6 @@
     main.appendChild(loading);
   }
 
-  function selectLevel(nextLevel) {
-    stopRequests();
-    levelNo = nextLevel;
-    state.instance = null;
-    state.content = null;
-    state.finish = null;
-    state.error = null;
-    state.selected.clear();
-    machine.force(STATES.INTRO);
-    var next = new URL(global.location.href);
-    next.searchParams.set('game', gameCode);
-    next.searchParams.set('level', String(levelNo));
-    global.history.replaceState({}, '', next.pathname + next.search);
-    render();
-    restoreActive();
-  }
-
   function sessionHasBirthDate() {
     var current = api.session();
     return !!(current && current.user && current.user.birthDate);
@@ -639,7 +623,7 @@
     state.content = null;
     state.finish = null;
     state.error = null;
-    state.statusNote = '正在生成新关卡';
+    state.statusNote = '正在生成新的本局内容';
     machine.force(STATES.INTRO);
     machine.transition('START');
     render();
@@ -655,6 +639,10 @@
   }
 
   function handleInstance(instance) {
+    if (!instance || instance.levelNo !== 1) {
+      fail({ code: 'SINGLE_PLAYER_LEVEL_INVALID', message: '本游戏只有一个统一入口' });
+      return;
+    }
     state.instance = instance;
     if (instance && instance.instanceId) writeStorage(activeKey(), instance.instanceId);
     if (instance.status === 'GENERATING') {
@@ -779,7 +767,7 @@
       state.instance.status = 'COMPLETED';
       state.settling = false;
       state.statusNote = '进度和奖励已经保存';
-      state.progress[gameCode + ':' + levelNo] = true;
+      state.progress[gameCode] = true;
       render();
     }).catch(function (error) {
       if (activeController.signal.aborted) return;
@@ -797,21 +785,6 @@
     api.finish(state.instance.instanceId, { requestId: state.finishRequestId, discovery: '' }, activeController.signal)
       .then(function (finish) { state.finish = finish; render(); })
       .catch(function () { /* completed content stays readable even if reward retrieval is temporarily unavailable */ });
-  }
-
-  function regenerate() {
-    if (!state.instance) return;
-    machine.force(machine.state);
-    if (machine.state === STATES.DEMO) machine.transition('REGENERATE');
-    else machine.force(STATES.GENERATING);
-    state.content = null;
-    state.selected.clear();
-    render();
-    var requestId = api.createRequestId();
-    var activeController = controller();
-    api.regenerate(state.instance.instanceId, { requestId: requestId }, activeController.signal)
-      .then(handleInstance)
-      .catch(function (error) { if (!activeController.signal.aborted) fail(error); });
   }
 
   function retryGeneration() {
@@ -832,8 +805,15 @@
   }
 
   function restartFromResult() {
-    machine.force(STATES.INTRO);
-    state.instance = null;
+    if (!state.instance) {
+      machine.force(STATES.INTRO);
+      render();
+      startNew();
+      return;
+    }
+    stopRequests();
+    var previousInstanceId = state.instance.instanceId;
+    machine.force(STATES.GENERATING);
     state.content = null;
     state.finish = null;
     state.error = null;
@@ -841,22 +821,29 @@
     state.finishRequestId = null;
     state.settling = false;
     removeStorage(activeKey());
+    removeStorage(finishKey(previousInstanceId));
+    state.statusNote = '正在生成新的本局内容';
     render();
-    startNew();
+    var requestId = api.createRequestId();
+    var activeController = controller();
+    api.regenerate(previousInstanceId, { requestId: requestId }, activeController.signal)
+      .then(handleInstance)
+      .catch(function (error) { if (!activeController.signal.aborted) fail(error); });
   }
 
   function fail(error) {
     stopRequests();
     state.error = error || { code: 'GENERATION_FAILED' };
     machine.force(STATES.FAILED);
-    state.statusNote = '本关内容暂时生成失败';
+    state.statusNote = '本局内容暂时生成失败';
     render();
   }
 
   function restoreActive() {
     if (!api.session()) return;
-    var instanceId = readStorage(activeKey());
+    var instanceId = readStorage(activeKey()) || readStorage(legacyActiveKey());
     if (!instanceId) return;
+    if (!readStorage(activeKey())) writeStorage(activeKey(), instanceId);
     state.statusNote = '正在恢复上次进度';
     machine.force(STATES.GENERATING);
     render();
@@ -865,6 +852,7 @@
       if (activeController.signal.aborted) return;
       if (error && error.status === 404) {
         removeStorage(activeKey());
+        removeStorage(legacyActiveKey());
         machine.force(STATES.INTRO);
         state.statusNote = '';
         render();
@@ -878,7 +866,7 @@
     if (!api.session()) return Promise.resolve();
     return api.progress().then(function (items) {
       (items || []).forEach(function (item) {
-        if (item.completed) state.progress[item.gameCode + ':' + item.levelNo] = true;
+        if (item.completed) state.progress[item.gameCode] = true;
       });
       if (machine.state === STATES.INTRO) render();
     }).catch(function () { /* catalog remains available without account progress */ });
@@ -887,12 +875,10 @@
   function loadCatalog() {
     return api.games().then(function (items) {
       var serverGame = (items || []).find(function (item) { return item.gameCode === gameCode; });
-      if (!serverGame || !Array.isArray(serverGame.levels) || serverGame.levels.length !== 12) return;
+      if (!serverGame || Number(serverGame.levelNo || 1) !== 1) return;
       game.description = serverGame.description || game.description;
       game.learningGoal = serverGame.learningGoal || game.learningGoal;
-      serverGame.levels.forEach(function (level, index) {
-        game.levels[index].learningGoal = level.learningGoal || game.levels[index].learningGoal;
-      });
+      game.estimatedMinutes = Number(serverGame.estimatedMinutes || game.estimatedMinutes);
       if (machine.state === STATES.INTRO) render();
     }).catch(function () { /* fixed metadata is allowed; generated game content never falls back */ });
   }

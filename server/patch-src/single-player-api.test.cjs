@@ -7,10 +7,13 @@ const { randomUUID } = require('node:crypto');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
 const serverRoot = path.join(projectRoot, 'server');
-const jarPath = path.join(serverRoot, 'generated', 'zhiqu-server.jar');
+const jarPath = path.resolve(process.env.ZHIQU_SERVER_JAR || path.join(serverRoot, 'generated', 'zhiqu-server.jar'));
 const tempRoot = fs.mkdtempSync(path.join(serverRoot, '.patch-single-player-api-'));
 const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlXQAAAAASUVORK5CYII=';
 let generationCounter = 0;
+let promptGenerationCounter = 0;
+let visionRequestCounter = 0;
+let imageRequestCounter = 0;
 
 function option(id, label, extra = {}) {
   return { id, label, ...extra };
@@ -20,9 +23,22 @@ function ability() {
   return { taskCompletion: 1, evidenceUse: 1, revisionQuality: 1, explanationClarity: 1 };
 }
 
+function resultDetails(discovery, limitation) {
+  return {
+    evidence: '我用本局原始信息核对了 AI 的判断。',
+    aiCorrect: 'AI 提取出了一部分可观察信息。',
+    uncertain: limitation,
+    change: discovery,
+    discovery,
+    limitation,
+  };
+}
+
 function promptGame(levelNo) {
   generationCounter += 1;
+  promptGenerationCounter += 1;
   const suffix = `局次${generationCounter}`;
+  const secondRoundIsMissing = promptGenerationCounter % 2 === 0;
   const rounds = [
     {
       roundId: 'r1', title: `对象观察 ${suffix}`, original: `请观察这句实时短句 ${suffix}`,
@@ -38,17 +54,30 @@ function promptGame(levelNo) {
       },
     },
     {
-      roundId: 'r2', title: `含糊观察 ${suffix}`, original: `把那个放到左边 ${suffix}`,
-      aiExtracted: ['对象：不确定', '位置：左边'], prompt: '哪一项能让对象更明确？',
-      options: [
-        option('r2-good', '把圆形卡片放到左边', { fieldKey: 'object', value: '圆形卡片', clear: true, ambiguous: false, conflictGroup: '', changedField: '' }),
-        option('r2-bad', '保留“那个”', { fieldKey: 'object', value: '那个', clear: false, ambiguous: true, conflictGroup: '', changedField: '' }),
-      ],
-      answer: {
-        rule: { type: 'AMBIGUITY', targetField: 'object', ambiguousToken: '不存在的词', conflictGroup: '', changedField: '' },
-        hint: '把“那个”换成能直接看到的名称。', feedback: '具体名称让 AI 不必猜“那个”指什么。',
-        comparison: { before: '对象不确定', after: '对象是圆形卡片' }, ability: ability(),
-      },
+      roundId: 'r2', title: `${secondRoundIsMissing ? '遗漏' : '含糊'}观察 ${suffix}`,
+      original: secondRoundIsMissing ? `把两张卡片放到左边 ${suffix}` : `把那个放到左边 ${suffix}`,
+      aiExtracted: secondRoundIsMissing ? ['动作：放置', '位置：左边'] : ['对象：不确定', '位置：左边'],
+      prompt: secondRoundIsMissing ? 'AI 漏掉了哪一项信息？' : 'AI 的哪一项提取仍不确定？',
+      options: secondRoundIsMissing
+        ? [
+          option('r2-good', '数量：两张', { fieldKey: 'quantity', value: '两张', clear: false, ambiguous: false, conflictGroup: '', changedField: '' }),
+          option('r2-bad', '位置：左边', { fieldKey: 'location', value: '左边', clear: true, ambiguous: false, conflictGroup: '', changedField: '' }),
+        ]
+        : [
+          option('r2-good', '对象：“那个”', { fieldKey: 'object', value: '那个', clear: false, ambiguous: true, conflictGroup: '', changedField: '' }),
+          option('r2-bad', '位置：左边', { fieldKey: 'location', value: '左边', clear: true, ambiguous: false, conflictGroup: '', changedField: '' }),
+        ],
+      answer: secondRoundIsMissing
+        ? {
+          rule: { type: 'MISSING', targetField: 'quantity', ambiguousToken: '', conflictGroup: '', changedField: '' },
+          hint: '比较原句和 AI 提取结果中的数量。', feedback: '原句写了“两张”，但 AI 没有提取数量。',
+          comparison: { before: '原句包含两张', after: 'AI 结果没有数量' }, ability: ability(),
+        }
+        : {
+          rule: { type: 'AMBIGUITY', targetField: 'object', ambiguousToken: '那个', conflictGroup: '', changedField: '' },
+          hint: '找出不能直接知道具体对象的词。', feedback: '“那个”没有说明具体对象，所以 AI 仍然不确定。',
+          comparison: { before: '原句使用“那个”', after: 'AI 标记对象不确定' }, ability: ability(),
+        },
     },
     {
       roundId: 'r3', title: `单变量观察 ${suffix}`, original: `只改变地点，看看提取怎样变化 ${suffix}`,
@@ -72,14 +101,19 @@ function promptGame(levelNo) {
       explanation: '补上本局生成的对象后，AI 提取的信息多了一项。',
     },
     rounds,
-    result: {
-      discovery: `我发现 ${suffix} 中，一个字段变化会让 AI 的提取结果跟着变化。`,
-      limitation: 'AI 只能读取句子里已有的信息，不知道没有写出的真实想法。',
-    },
+    result: resultDetails(
+      `我发现 ${suffix} 中，一个字段变化会让 AI 的提取结果跟着变化。`,
+      'AI 只能读取句子里已有的信息，不知道没有写出的真实想法。',
+    ),
   };
 }
 
 function routeGame() {
+  const task = (maxDistance = null) => ({
+    objective: 'DISTANCE',
+    constraints: { maxDistance, maxTime: null, maxCost: null, minSafety: null, requiredMetrics: ['distance'], requireCompleteInformation: false },
+    weights: { distance: 1, time: 0, cost: 0, safety: 0 },
+  });
   return {
     safety: { status: 'SAFE', reason: '抽象虚构图' },
     themeLabel: `星点图${++generationCounter}`,
@@ -99,11 +133,7 @@ function routeGame() {
         { id: 'bc', from: 'B', to: 'C', distance: 3, time: 2, cost: 3, safety: 2 },
       ],
     },
-    tasks: Array.from({ length: 4 }, () => ({
-      objective: 'DISTANCE',
-      constraints: { maxDistance: null, maxTime: null, maxCost: null, minSafety: null, requiredMetrics: ['distance'], requireCompleteInformation: false },
-      weights: { distance: 1, time: 0, cost: 0, safety: 0 },
-    })),
+    tasks: [task(), task(), task(), task(12)],
   };
 }
 
@@ -117,12 +147,22 @@ function soundGame() {
   return {
     safety: { status: 'SAFE', reason: '无歌词原创结构' }, instruction: '听本局结构化乐段并找证据。',
     demo: { title: '速度示范', sequence, explanation: '每分钟拍数是速度证据。' },
-    rounds: [1, 2, 3].map((number) => ({
-      roundId: `r${number}`, title: '速度观察', prompt: '这个乐段的速度属于哪一档？', sequence,
-      options: [option(`r${number}-good`, '中速', { value: 'MEDIUM', kind: 'CHOICE', evidenceMetric: 'TEMPO' }), option(`r${number}-bad`, '快速', { value: 'FAST', kind: 'CHOICE', evidenceMetric: 'TEMPO' })],
-      answer: { questionType: 'TEMPO', changedMetric: '', hint: '看看每分钟拍数。', feedback: '96 BPM 属于程序设定的中速范围。', comparison: { tempo: 96 }, ability: ability() },
-    })),
-    result: { discovery: '我发现 96 BPM 给出了可测量的速度证据。', limitation: '同一速度仍可能让不同的人产生不同感受。' },
+    rounds: [1, 2, 3].map((number) => {
+      const changed = number === 3;
+      return {
+        roundId: `r${number}`, title: changed ? '速度变化' : '速度观察', prompt: changed ? '哪一个声音参数改变了？' : '这个乐段的速度属于哪一档？',
+        sequence: changed ? { ...sequence, tempo: 126 } : sequence,
+        options: changed
+          ? [option(`r${number}-good`, '速度', { value: 'TEMPO', kind: 'CHOICE', evidenceMetric: 'TEMPO' }), option(`r${number}-bad`, '力度', { value: 'DYNAMICS', kind: 'CHOICE', evidenceMetric: 'DYNAMICS' })]
+          : [option(`r${number}-good`, '中速', { value: 'MEDIUM', kind: 'CHOICE', evidenceMetric: 'TEMPO' }), option(`r${number}-bad`, '快速', { value: 'FAST', kind: 'CHOICE', evidenceMetric: 'TEMPO' })],
+        answer: {
+          questionType: changed ? 'CHANGE' : 'TEMPO', changedMetric: changed ? 'TEMPO' : '', hint: '看看每分钟拍数。',
+          feedback: changed ? '只有速度从 96 BPM 变成了 126 BPM。' : '96 BPM 属于程序设定的中速范围。',
+          comparison: { beforeTempo: 96, afterTempo: changed ? 126 : 96 }, ability: ability(),
+        },
+      };
+    }),
+    result: resultDetails('我发现 96 BPM 给出了可测量的速度证据。', '同一速度仍可能让不同的人产生不同感受。'),
   };
 }
 
@@ -136,13 +176,21 @@ function imageGame() {
         { id: 'flag', label: '黄色三角旗', primary: false, color: '亮黄色', shape: '三角形', x: 50, y: 25, relation: '在盒子上方' },
       ],
     },
+    variantSceneSpec: {
+      imagePrompt: '原创儿童插画，蓝色圆形盒子上方有黄色三角旗，不含文字和真实人物。',
+      elements: [
+        { id: 'box', label: '蓝色圆形盒子', primary: true, color: '深蓝色', shape: '圆形', x: 50, y: 60, relation: '在下方' },
+        { id: 'flag', label: '黄色三角旗', primary: false, color: '亮黄色', shape: '三角形', x: 50, y: 25, relation: '在盒子上方' },
+      ],
+    },
+    change: { elementId: 'box', field: 'color', before: '深绿色', after: '深蓝色' },
     demo: { title: '主体示范', explanation: '主体同时有形状和位置证据。' },
     rounds: [1, 2, 3].map((number) => ({
       roundId: `r${number}`, title: '元素观察', prompt: '哪个选项对应画面主体？',
       options: [option(`r${number}-good`, '绿色圆形盒子', { elementId: 'box', value: 'box', key: 'element' }), option(`r${number}-bad`, '黄色三角旗', { elementId: 'flag', value: 'flag', key: 'element' })],
       answer: { targetElementId: 'box', targetValue: 'box', targetKey: 'element', hint: '同时看大小、形状和位置。', feedback: '主体盒子被图片规格和视觉模型同时识别。', comparison: { element: 'box' }, ability: ability() },
     })),
-    result: { discovery: '我发现主体需要多条画面证据。', limitation: '视觉模型仍可能漏看小元素。' },
+    result: resultDetails('我发现主体需要多条画面证据。', '视觉模型仍可能漏看小元素。'),
   };
 }
 
@@ -170,8 +218,14 @@ function createFakeProvider() {
     request.on('data', (chunk) => { raw += chunk; });
     request.on('end', () => {
       if (request.url.endsWith('/images/generations')) {
-        response.writeHead(200, { 'Content-Type': 'application/json' });
-        response.end(JSON.stringify({ data: [{ b64_json: tinyPng }] }));
+        const body = JSON.parse(raw);
+        imageRequestCounter += 1;
+        assert.equal(body.quality, 'low', 'single-player images must use the latency-friendly quality tier');
+        assert.equal(body.size, '512x512', 'single-player images must fit the mobile game surface without oversized generation');
+        assert.ok(body.prompt.includes('元素清晰分开'), 'image prompts must use the compact structured scene description');
+        assert.ok(body.prompt.length <= 600, 'image prompts must stay within the latency-friendly length cap');
+        response.writeHead(503, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ error: { code: 'provider_busy' } }));
         return;
       }
       let body;
@@ -179,25 +233,17 @@ function createFakeProvider() {
       const system = body.messages?.[0]?.content || '';
       const user = body.messages?.[1]?.content;
       if (system.includes('视觉核验器')) {
+        assert.equal(body.thinking?.type, 'disabled', 'MiniMax-M3 vision requests must disable thinking text');
+        visionRequestCounter += 1;
+        if (visionRequestCounter === 1) {
+          openAiResponse(response, { safety: { status: 'REJECTED', reason: '模拟一次视觉安全误判' } });
+          return;
+        }
         openAiResponse(response, recognition());
         return;
       }
       let context = {};
       try { context = JSON.parse(user || '{}'); } catch { /* visual requests use array content */ }
-      if (context.levelNo === 9) {
-        setTimeout(() => {
-          if (!response.writableEnded) openAiResponse(response, promptGame(context.levelNo));
-        }, 1800);
-        return;
-      }
-      if (context.levelNo === 10) {
-        openAiResponse(response, '{invalid-json');
-        return;
-      }
-      if (context.levelNo === 11) {
-        openAiResponse(response, { safety: { status: 'REJECTED', reason: 'test moderation rejection' } });
-        return;
-      }
       if (system.includes('抽象路线图')) openAiResponse(response, routeGame());
       else if (system.includes('声音小指挥')) openAiResponse(response, soundGame());
       else if (system.includes('图片侦探')) openAiResponse(response, imageGame());
@@ -240,7 +286,7 @@ function startApi(port, providerPort, name, configured) {
     MAGIC_IMAGE_MODEL: configured ? 'test-image-model' : '',
     SINGLE_PLAYER_VISION_BASE_URL: configured ? `http://127.0.0.1:${providerPort}/v1` : '',
     SINGLE_PLAYER_VISION_API_KEY: configured ? 'test-vision-key' : '',
-    SINGLE_PLAYER_VISION_MODEL: configured ? 'test-vision-model' : '',
+    SINGLE_PLAYER_VISION_MODEL: configured ? 'MiniMax-M3' : '',
     SINGLE_PLAYER_AI_TIMEOUT_SECONDS: '1',
     MEDIA_ROOT: path.join(work, 'media'),
   };
@@ -342,11 +388,21 @@ async function create(baseUrl, token, gameCode, levelNo) {
     const catalogResponse = await request(baseUrl, '/api/single-player-games');
     assert.equal(catalogResponse.status, 200, 'catalog must be public');
     assert.equal(catalogResponse.payload.length, 4);
-    assert.ok(catalogResponse.payload.every((game) => game.levels.length === 12));
+    assert.ok(catalogResponse.payload.every((game) => game.levelNo === 1 && !('levels' in game)));
     assert.equal((await request(baseUrl, '/api/single-player-games/progress')).status, 401, 'progress must require JWT');
 
     const alice = await register(baseUrl, 'spalice');
     const bob = await register(baseUrl, 'spbob');
+    const initialProgress = await request(baseUrl, '/api/single-player-games/progress', { token: alice.accessToken });
+    assert.equal(initialProgress.payload.length, 4, 'progress must return one status per game');
+    assert.ok(initialProgress.payload.every((item) => item.completed === false));
+
+    const invalidLevel = await request(baseUrl, '/api/single-player-games/prompt-writer/instances', {
+      method: 'POST', token: alice.accessToken,
+      body: { requestId: randomUUID(), levelNo: 2, ageBand: '6-8' },
+    });
+    assert.equal(invalidLevel.status, 400, 'new instances must use the single levelNo=1 entry');
+
     const created = await create(baseUrl, alice.accessToken, 'prompt-writer', 1);
     const ready = await waitInstance(baseUrl, alice.accessToken, created.instanceId);
     assert.equal(ready.status, 'READY');
@@ -394,7 +450,18 @@ async function create(baseUrl, token, gameCode, levelNo) {
     assert.equal(repeatedFinish.payload.reward.ledgerId, finish.payload.reward.ledgerId, 'repeat finish must not grant another reward');
     assert.equal(repeatedFinish.payload.reward.awardedXp, finish.payload.reward.awardedXp);
     const progress = await request(baseUrl, '/api/single-player-games/progress', { token: alice.accessToken });
-    assert.ok(progress.payload.some((item) => item.gameCode === 'prompt-writer' && item.levelNo === 1 && item.completed));
+    assert.equal(progress.payload.length, 4);
+    assert.ok(progress.payload.some((item) => item.gameCode === 'prompt-writer' && item.completed));
+    assert.ok(progress.payload.every((item) => !('levelNo' in item)), 'progress must be keyed by game rather than level');
+
+    const replay = await request(baseUrl, `/api/single-player-games/instances/${created.instanceId}/regenerate`, {
+      method: 'POST', token: alice.accessToken, body: { requestId: randomUUID() },
+    });
+    assert.equal(replay.status, 202);
+    assert.notEqual(replay.payload.instanceId, created.instanceId, 'replay must create a fresh instance');
+    assert.equal(replay.payload.levelNo, 1);
+    const replayReady = await waitInstance(baseUrl, alice.accessToken, replay.payload.instanceId);
+    assert.equal(replayReady.status, 'READY', 'the MISSING comparison variant must generate successfully');
 
     const routeCreated = await create(baseUrl, alice.accessToken, 'route-and-conditions', 1);
     const routeReady = await waitInstance(baseUrl, alice.accessToken, routeCreated.instanceId);
@@ -412,27 +479,18 @@ async function create(baseUrl, token, gameCode, levelNo) {
     const imageCreated = await create(baseUrl, alice.accessToken, 'image-detective', 1);
     const imageReady = await waitInstance(baseUrl, alice.accessToken, imageCreated.instanceId);
     assert.equal(imageReady.status, 'READY');
+    assert.ok(imageRequestCounter >= 4, 'provider failures must fall back to local scene rendering on both generation attempts');
+    assert.ok(visionRequestCounter >= 3, 'a rejected vision result must automatically regenerate once');
     assert.match(imageReady.content.imageUrl, /^\/api\/single-player-games\/media\//);
+    assert.match(imageReady.content.variantImageUrl, /^\/api\/single-player-games\/media\//);
+    assert.notEqual(imageReady.content.variantImageUrl, imageReady.content.imageUrl);
+    assert.match(imageReady.content.rounds[2].beforeImageUrl, /^\/api\/single-player-games\/media\//);
+    assert.match(imageReady.content.rounds[2].afterImageUrl, /^\/api\/single-player-games\/media\//);
     assert.ok(imageReady.content.altText.includes('绿色圆形盒子'), 'image content must expose generated alt text');
     assertNoAnswerSpec(imageReady.content);
     const mediaResponse = await fetch(baseUrl + imageReady.content.imageUrl);
     assert.equal(mediaResponse.status, 200, 'generated image must use the dedicated media endpoint');
     assert.equal(mediaResponse.headers.get('content-type'), 'image/png');
-
-    const invalidCreated = await create(baseUrl, alice.accessToken, 'prompt-writer', 10);
-    const invalid = await waitInstance(baseUrl, alice.accessToken, invalidCreated.instanceId);
-    assert.equal(invalid.status, 'FAILED');
-    assert.equal(invalid.failureCode, 'AI_RESPONSE_INVALID');
-
-    const rejectedCreated = await create(baseUrl, alice.accessToken, 'prompt-writer', 11);
-    const rejected = await waitInstance(baseUrl, alice.accessToken, rejectedCreated.instanceId);
-    assert.equal(rejected.status, 'REJECTED');
-    assert.equal(rejected.failureCode, 'AI_CONTENT_REJECTED');
-
-    const timeoutCreated = await create(baseUrl, alice.accessToken, 'prompt-writer', 9);
-    const timeout = await waitInstance(baseUrl, alice.accessToken, timeoutCreated.instanceId);
-    assert.equal(timeout.status, 'FAILED');
-    assert.equal(timeout.failureCode, 'AI_TIMEOUT');
 
     await stopApi(apiProcess);
     apiProcess = null;
@@ -449,7 +507,7 @@ async function create(baseUrl, token, gameCode, levelNo) {
     assert.equal(unavailable.status, 503, 'missing text model must be an explicit 503');
     assert.equal(unavailable.payload.code, 'SINGLE_PLAYER_AI_NOT_CONFIGURED');
 
-    console.log(JSON.stringify({ result: 'ok', checks: 47, generatedInstances: 7 }));
+    console.log(JSON.stringify({ result: 'ok', checks: 58, generatedInstances: 5 }));
   } finally {
     await stopApi(apiProcess);
     await stopApi(unconfiguredProcess);

@@ -6,28 +6,28 @@
     {
       code: 'prompt-writer',
       title: '提示词小作家',
-      duration: '语文 · 12 关',
+      duration: '语文 · 约 6 分钟',
       description: '观察 AI 怎样从一句话中提取对象、动作、地点和条件。',
       goal: '比较原始信息、AI 提取结果和一次信息变化。'
     },
     {
       code: 'image-detective',
       title: '图片侦探',
-      duration: '艺术 · 12 关',
+      duration: '艺术 · 约 7 分钟',
       description: '比较画面、视觉模型识别和自己的观察。',
       goal: '用主体、形状、位置和关系证据核对判断。'
     },
     {
       code: 'sound-conductor',
       title: '声音小指挥',
-      duration: '音乐 · 12 关',
+      duration: '音乐 · 约 6 分钟',
       description: '听 AI 怎样测量速度、力度、音色和节拍。',
       goal: '用可听见、可看见的声音特征说明依据。'
     },
     {
       code: 'route-and-conditions',
       title: '路线与条件',
-      duration: '数学 · 12 关',
+      duration: '数学 · 约 7 分钟',
       description: '读取抽象地图的数字和限制，再比较候选路线。',
       goal: '用确定性计算核对 AI 生成的路线条件。'
     },
@@ -68,14 +68,14 @@
     textNodes[3].textContent = placeholder.goal;
     textNodes[4].textContent = '单人游戏';
 
-    button.setAttribute('aria-label', `${placeholder.title}，进入 12 关单人游戏`);
+    button.setAttribute('aria-label', `${placeholder.title}，进入单人游戏`);
     button.removeAttribute('aria-disabled');
     button.tabIndex = 0;
     button.dataset.zhiquSinglePlayerCard = placeholder.code;
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      window.location.assign(`/single-player-game?game=${encodeURIComponent(placeholder.code)}&level=1`);
+      window.location.assign(`/single-player-game?game=${encodeURIComponent(placeholder.code)}`);
     });
     return true;
   }

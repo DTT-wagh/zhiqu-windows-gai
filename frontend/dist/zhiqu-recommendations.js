@@ -4,15 +4,21 @@
 
   const SESSION_KEY = 'zhiqu.auth.session.v1';
   const EVENTS_KEY_PREFIX = 'zq:recommendation-events:';
-  const NOT_INTERESTED_KEY_PREFIX = 'zq:recommendation-not-interested:';
   const MAX_EVENTS = 600;
   const HOT_RECOMMENDATION_WEIGHTS = Object.freeze({
-    recentValidWatch: 0.40,
-    completionQuality: 0.25,
-    highQualityInteraction: 0.20,
-    freshness: 0.10,
-    exploration: 0.05,
+    viewCount: 0.20,
+    growthVelocity: 0.20,
+    completionRate: 0.20,
+    favoriteRate: 0.10,
+    likeRate: 0.10,
+    shareRate: 0.05,
+    commentRate: 0.05,
+    learningEffect: 0.05,
+    freshness: 0.05,
   });
+  const HOT_ENDPOINT = '/api/contents/hot';
+  const HOT_CACHE_MS = 5 * 60 * 1000;
+  const MAX_EARLY_ITEMS_PER_GROUP = 2;
 
   function readJson(key, fallback) {
     try {
@@ -69,15 +75,6 @@
 
   globalThis.__zqRecommendationTrack = track;
 
-  function hash(value) {
-    let result = 2166136261;
-    for (let index = 0; index < value.length; index += 1) {
-      result ^= value.charCodeAt(index);
-      result = Math.imul(result, 16777619);
-    }
-    return result >>> 0;
-  }
-
   function clamp(value, min = 0, max = 1) {
     return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
   }
@@ -113,6 +110,7 @@
       type: String(source.type || source.contentType || fallback.type || 'VIDEO').toUpperCase(),
       title: String(source.title || source.name || fallback.title || ''),
       seriesId: String(source.seriesId || source.series?.id || source.courseId || fallback.seriesId || source.id || ''),
+      topicKey: String(source.topicKey || source.topic || source.subject || source.categorySlug || fallback.topicKey || source.id || ''),
       episodeNo: Number(source.episodeNo ?? source.episode ?? fallback.episodeNo ?? 1),
       sortOrder: Number(source.sortOrder ?? fallback.sortOrder ?? 1),
       subject: String(source.subject || source.categoryName || source.category || fallback.subject || '其他'),
@@ -126,21 +124,34 @@
       reviewStatus: status(source.reviewStatus ?? source.moderationStatus ?? fallback.reviewStatus, 'UNKNOWN'),
       safetyStatus: status(source.safetyStatus ?? source.childSafetyStatus ?? fallback.safetyStatus, 'UNKNOWN'),
       childSafe: (source.childSafe ?? source.forChildren ?? fallback.childSafe ?? fallback.forChildren) === true,
+      qualityStatus: status(source.qualityStatus ?? source.contentQualityStatus ?? fallback.qualityStatus, 'UNKNOWN'),
       containsAdvertising: Boolean(source.containsAdvertising || source.advertising || source.isAd || fallback.containsAdvertising),
       containsDangerousInstruction: Boolean(source.containsDangerousInstruction || source.dangerous || source.riskLevel === 'HIGH' || fallback.containsDangerousInstruction),
       externalOnly: Boolean(source.externalOnly || source.externalUrlOnly || source.externalLinkOnly || fallback.externalOnly),
       publishedAt: source.publishedAt || source.createdAt || fallback.publishedAt || '',
       qualityScore: clamp(Number(source.qualityScore ?? source.quality ?? fallback.qualityScore ?? 0.55)),
       editorFeatured: Boolean(source.editorFeatured ?? source.featured ?? fallback.editorFeatured),
+      viewCount: Math.max(0, Number(source.viewCount ?? source.totalViewCount ?? source.playCount ?? fallback.viewCount ?? 0)),
+      recentViews24h: Math.max(0, Number(source.recentViews24h ?? source.recentViewCount24h ?? fallback.recentViews24h ?? 0)),
+      recentViews7d: Math.max(0, Number(source.recentViews7d ?? source.recentViewCount7d ?? fallback.recentViews7d ?? 0)),
+      viewerCount: Math.max(0, Number(source.viewerCount ?? source.validViewerCount ?? fallback.viewerCount ?? 0)),
+      completedViewerCount: Math.max(0, Number(source.completedViewerCount ?? source.completedViewers ?? fallback.completedViewerCount ?? 0)),
       progressSeconds: Number(source.progressSeconds ?? source.lastPosition ?? fallback.progressSeconds ?? 0),
       watchedPercent: Number(source.watchedPercent ?? source.percent ?? fallback.watchedPercent ?? 0),
       completionRate: Number(source.completionRate ?? source.completionPercent ?? fallback.completionRate ?? 0),
       completed: Boolean(source.completed || source.completedAt || source.learningStatus === 'COMPLETED' || fallback.completed),
-      recentValidWatch: Number(source.recentValidWatch ?? source.recentValidWatchCount ?? source.recentViews ?? source.recentViewerCount ?? fallback.recentValidWatch ?? 0),
-      saveCount: Number(source.saveCount ?? source.favoriteCount ?? fallback.saveCount ?? 0),
-      shareCount: Number(source.shareCount ?? fallback.shareCount ?? 0),
-      qualityInteractionCount: Number(source.qualityInteractionCount ?? source.commentCount ?? source.questionCount ?? source.answerCount ?? fallback.qualityInteractionCount ?? 0),
-      exposureCount: Number(source.exposureCount ?? fallback.exposureCount ?? 0),
+      favoriteCount: Math.max(0, Number(source.favoriteCount ?? source.saveCount ?? fallback.favoriteCount ?? 0)),
+      likeCount: Math.max(0, Number(source.likeCount ?? source.likes ?? fallback.likeCount ?? 0)),
+      shareCount: Math.max(0, Number(source.shareCount ?? source.shares ?? fallback.shareCount ?? 0)),
+      commentCount: Math.max(0, Number(source.commentCount ?? source.comments ?? fallback.commentCount ?? 0)),
+      quizCount: Math.max(0, Number(source.quizCount ?? source.nodeQuestionCount ?? fallback.quizCount ?? 0)),
+      quizAttemptCount: Math.max(0, Number(source.quizAttemptCount ?? source.learningEffectSampleSize ?? fallback.quizAttemptCount ?? 0)),
+      quizCorrectCount: Math.max(0, Number(source.quizCorrectCount ?? source.correctQuizCount ?? fallback.quizCorrectCount ?? 0)),
+      completionSampleSize: Math.max(0, Number(source.completionSampleSize ?? source.viewerCount ?? fallback.completionSampleSize ?? 0)),
+      favoriteSampleSize: Math.max(0, Number(source.favoriteSampleSize ?? source.viewerCount ?? fallback.favoriteSampleSize ?? 0)),
+      likeSampleSize: Math.max(0, Number(source.likeSampleSize ?? fallback.likeSampleSize ?? 0)),
+      shareSampleSize: Math.max(0, Number(source.shareSampleSize ?? fallback.shareSampleSize ?? 0)),
+      commentSampleSize: Math.max(0, Number(source.commentSampleSize ?? fallback.commentSampleSize ?? 0)),
       negativeFeedback: Number(source.negativeFeedback ?? source.notInterestedCount ?? fallback.negativeFeedback ?? 0),
       videoUrlKnown: Boolean(videoUrl),
     };
@@ -149,87 +160,109 @@
   function approved(candidate) {
     const reviewed = ['APPROVED', 'PASSED', 'PASS', 'VERIFIED', 'PUBLISHED', 'ACTIVE', 'COMPLETED'];
     const safe = ['SAFE', 'APPROVED', 'PASSED', 'PASS', 'VERIFIED', 'PUBLISHED', 'ACTIVE', 'COMPLETED'];
+    const quality = ['QUALIFIED', 'APPROVED', 'PASSED', 'PASS', 'VERIFIED', 'PUBLISHED', 'ACTIVE'];
     return candidate.childSafe === true && reviewed.includes(candidate.reviewStatus) && safe.includes(candidate.safetyStatus)
+      && quality.includes(candidate.qualityStatus)
       && !candidate.containsAdvertising && !candidate.containsDangerousInstruction && !candidate.externalOnly;
   }
 
   function usable(candidate, notInterested) {
     if (!candidate.id || candidate.type !== 'VIDEO' || !candidate.title) return false;
-    if (!validUrl(candidate.coverUrl) || (candidate.videoUrlKnown && !validUrl(candidate.videoUrl))) return false;
+    if ((candidate.coverUrl && !validUrl(candidate.coverUrl)) || (candidate.videoUrlKnown && !validUrl(candidate.videoUrl))) return false;
     if (!['PUBLISHED', 'ACTIVE', 'COMPLETED'].includes(candidate.status) || !approved(candidate)) return false;
     if (!candidate.summary || candidate.negativeFeedback > 3 || notInterested.has(candidate.id)) return false;
     return true;
   }
 
   function freshness(candidate) {
-    if (!candidate.publishedAt) return 0.4;
+    if (!candidate.publishedAt) return 0.5;
     const days = Math.max(0, (Date.now() - Date.parse(candidate.publishedAt)) / 86400000);
-    return Number.isFinite(days) ? Math.exp(-days / 30) : 0.4;
+    return Number.isFinite(days) ? clamp(Math.exp(-days / 30)) : 0.5;
   }
 
-  function quality(candidate) {
-    const completion = candidate.completionRate > 1 ? candidate.completionRate / 100 : candidate.completionRate;
-    return clamp(candidate.qualityScore * 0.7 + clamp(completion || 0) * 0.3);
+  function normalizedRate(candidate, rateKey, successKey, sampleKey, fallback = 0.5) {
+    const explicit = Number(candidate[rateKey]);
+    const rate = Number.isFinite(explicit) && explicit > 0 ? (explicit > 1 ? explicit / 100 : explicit) : null;
+    const successes = Math.max(0, Number(candidate[successKey]) || 0);
+    const sample = Math.max(successes, Number(candidate[sampleKey]) || 0);
+    if (rate === null && sample <= 0) return fallback;
+    const observed = rate === null ? clamp(successes / Math.max(sample, 1)) : clamp(rate);
+    const priorStrength = 20;
+    return clamp((observed * sample + fallback * priorStrength) / (sample + priorStrength));
+  }
+
+  function logNormalize(values) {
+    const transformed = values.map((value) => Math.log1p(Math.max(0, Number(value) || 0)));
+    const min = Math.min(...transformed);
+    const max = Math.max(...transformed);
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max - min < 1e-9) return transformed.map(() => 0.5);
+    return transformed.map((value) => clamp((value - min) / (max - min)));
+  }
+
+  function scoreCandidates(candidates) {
+    const viewNorm = logNormalize(candidates.map((candidate) => candidate.viewCount));
+    const growthNorm = logNormalize(candidates.map((candidate) => 0.6 * candidate.recentViews24h + 0.4 * candidate.recentViews7d / 7));
+    return candidates.map((candidate, index) => {
+      const viewerSample = Math.max(candidate.viewerCount, candidate.viewCount, 0);
+      const metrics = {
+        viewCount: viewNorm[index],
+        growthVelocity: growthNorm[index],
+        completionRate: normalizedRate(candidate, 'completionRate', 'completedViewerCount', 'completionSampleSize'),
+        favoriteRate: normalizedRate(candidate, 'favoriteRate', 'favoriteCount', 'favoriteSampleSize'),
+        likeRate: normalizedRate(candidate, 'likeRate', 'likeCount', 'likeSampleSize'),
+        shareRate: normalizedRate(candidate, 'shareRate', 'shareCount', 'shareSampleSize'),
+        commentRate: normalizedRate(candidate, 'commentRate', 'commentCount', 'commentSampleSize'),
+        learningEffect: candidate.quizCount > 0
+          ? normalizedRate(candidate, 'learningEffect', 'quizCorrectCount', 'quizAttemptCount')
+          : 0.5,
+        freshness: freshness(candidate),
+      };
+      const hotScore = 100 * Object.entries(HOT_RECOMMENDATION_WEIGHTS)
+        .reduce((total, [key, weight]) => total + weight * metrics[key], 0);
+      return {
+        ...candidate,
+        score: hotScore,
+        hotScore,
+        hotMetrics: metrics,
+        exploration: freshness(candidate) >= 0.65 && viewerSample <= 20,
+      };
+    });
   }
 
   function score(candidate, batch) {
-    const recentWatch = clamp(candidate.recentValidWatch / 20);
-    const completion = quality(candidate);
-    const interaction = clamp((candidate.saveCount + candidate.shareCount * 1.5 + candidate.qualityInteractionCount) / 20);
-    const fresh = freshness(candidate);
-    const exploration = clamp(freshness(candidate) * 0.55 + (candidate.exposureCount === 0 ? 0.45 : 1 / (1 + candidate.exposureCount)));
-    let value = HOT_RECOMMENDATION_WEIGHTS.recentValidWatch * recentWatch
-      + HOT_RECOMMENDATION_WEIGHTS.completionQuality * completion
-      + HOT_RECOMMENDATION_WEIGHTS.highQualityInteraction * interaction
-      + HOT_RECOMMENDATION_WEIGHTS.freshness * fresh
-      + HOT_RECOMMENDATION_WEIGHTS.exploration * exploration;
-    value -= (Number(candidate.negativeFeedback) || 0) * 0.04;
-    value += (hash(`${candidate.id}|${batch}`) % 1000) / 100000;
-    return { ...candidate, score: value, exploration: exploration >= 0.45 };
+    return scoreCandidates([candidate], batch)[0];
   }
 
   function rerank(candidates, count, batch) {
     const desired = Math.min(count, candidates.length);
     if (!desired) return [];
-    const maxPerSeries = Math.max(1, Math.min(2, Math.floor(desired * 0.4)));
+    const maxPerSeries = MAX_EARLY_ITEMS_PER_GROUP;
+    const maxPerTopic = MAX_EARLY_ITEMS_PER_GROUP;
     const selected = [];
+    const deferred = [];
     const seriesCounts = new Map();
-    const subjects = new Set();
-    const pool = [...candidates].sort((a, b) => b.score - a.score || hash(`${a.id}|${batch}`) - hash(`${b.id}|${batch}`));
+    const topicCounts = new Map();
+    const pool = [...candidates].sort((a, b) => b.score - a.score || String(a.id).localeCompare(String(b.id)));
     const take = (candidate) => {
       const seriesCount = seriesCounts.get(candidate.seriesId) || 0;
-      if (selected.some((item) => item.id === candidate.id) || seriesCount >= maxPerSeries) return false;
+      const topicCount = topicCounts.get(candidate.topicKey) || 0;
+      if (selected.some((item) => item.id === candidate.id) || seriesCount >= maxPerSeries || topicCount >= maxPerTopic) return false;
       selected.push(candidate);
       seriesCounts.set(candidate.seriesId, seriesCount + 1);
-      subjects.add(candidate.subject);
+      topicCounts.set(candidate.topicKey, topicCount + 1);
       return true;
     };
     for (const candidate of pool) {
-      if (selected.length >= desired || subjects.size >= Math.min(3, desired)) break;
-      if (!subjects.has(candidate.subject)) take(candidate);
-    }
-    for (const candidate of pool) {
       if (selected.length >= desired) break;
-      take(candidate);
+      if (!take(candidate)) deferred.push(candidate);
     }
-    const explorationTarget = Math.ceil(desired * 0.3);
-    for (const explorer of pool.filter((candidate) => candidate.exploration && !selected.some((item) => item.id === candidate.id))) {
-      if (selected.filter((item) => item.exploration).length >= explorationTarget) break;
-      const replaceIndex = selected.findIndex((item) => !item.exploration && (seriesCounts.get(explorer.seriesId) || 0) < maxPerSeries);
-      if (replaceIndex < 0) continue;
-      const previous = selected[replaceIndex];
-      seriesCounts.set(previous.seriesId, Math.max(0, (seriesCounts.get(previous.seriesId) || 1) - 1));
-      selected[replaceIndex] = explorer;
-      seriesCounts.set(explorer.seriesId, (seriesCounts.get(explorer.seriesId) || 0) + 1);
-    }
-    return selected.slice(0, desired);
+    return [...selected, ...deferred].slice(0, desired);
   }
 
   function sortFeatured(items, batch = 0) {
-    const notInterested = new Set(array(readJson(`${NOT_INTERESTED_KEY_PREFIX}${currentUserId()}`, [])).map(String));
     const candidates = array(items).map((item) => normalize(item));
-    const filtered = candidates.filter((candidate) => usable(candidate, notInterested));
-    const ranked = rerank(filtered.map((candidate) => score(candidate, batch)), filtered.length, batch);
+    const filtered = candidates.filter((candidate) => usable(candidate, new Set()));
+    const ranked = rerank(scoreCandidates(filtered, batch), filtered.length, batch);
     ranked.forEach((candidate, position) => track('recommendation_impression', {
       videoId: candidate.id,
       seriesId: candidate.seriesId,
@@ -242,24 +275,59 @@
     if (!response || !response.ok) return Promise.resolve(response);
     return response.clone().json().then((payload) => {
       if (!payload || !Array.isArray(payload.featured)) return response;
-      const headers = new Headers(response.headers);
-      headers.set('content-type', 'application/json');
-      return new Response(JSON.stringify({ ...payload, featured: sortFeatured(payload.featured, batch) }), {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
+      return loadHotVideos().then((hotVideos) => {
+        const source = hotVideos.length ? hotVideos : payload.featured.map((item) => normalize(item, {
+          reviewStatus: 'APPROVED',
+          safetyStatus: 'SAFE',
+          childSafe: true,
+          qualityStatus: 'QUALIFIED',
+        }));
+        const headers = new Headers(response.headers);
+        headers.set('content-type', 'application/json');
+        return new Response(JSON.stringify({ ...payload, featured: sortFeatured(source, batch) }), {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
       });
     }).catch(() => response);
   }
 
-  const originalFetch = window.fetch.bind(window);
+  const originalFetch = typeof window.fetch === 'function' ? window.fetch.bind(window) : null;
+  let hotCachePromise = null;
+  let hotCacheExpiresAt = 0;
+
+  function apiBase() {
+    return String(window.__ZHIQU_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '');
+  }
+
+  function loadHotVideos() {
+    if (!originalFetch) return Promise.resolve([]);
+    if (hotCachePromise && Date.now() < hotCacheExpiresAt) return hotCachePromise;
+    hotCacheExpiresAt = Date.now() + HOT_CACHE_MS;
+    hotCachePromise = originalFetch(`${apiBase()}${HOT_ENDPOINT}`, {
+      headers: { Accept: 'application/json' },
+    }).then((response) => {
+      if (!response.ok) throw new Error(`hot videos failed: ${response.status}`);
+      return response.json();
+    }).then(array).catch(() => {
+      hotCachePromise = null;
+      hotCacheExpiresAt = 0;
+      return [];
+    });
+    return hotCachePromise;
+  }
+
   let batch = 0;
-  window.fetch = (input, init) => {
-    const url = typeof input === 'string' ? input : input?.url || '';
-    const result = originalFetch(input, init);
-    if (!/\/api\/learning(?:\?|$)/.test(url)) return result;
-    return result.then((response) => adaptResponse(response, batch++));
-  };
+  globalThis.__zqHotRecommendations = () => loadHotVideos().then((items) => sortFeatured(items, batch++));
+  if (originalFetch) {
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input?.url || '';
+      const result = originalFetch(input, init);
+      if (!/\/api\/learning(?:\?|$)/.test(url)) return result;
+      return result.then((response) => adaptResponse(response, batch++));
+    };
+  }
 
   function bindVideo(video) {
     if (video.dataset.zqHotRecommendationEvents === '1') return;
@@ -292,8 +360,12 @@
     normalize,
     usable,
     score,
+    scoreCandidates,
     rerank,
     sortFeatured,
+    freshness,
+    normalizedRate,
+    logNormalize,
   });
 
   function observeVideos() {

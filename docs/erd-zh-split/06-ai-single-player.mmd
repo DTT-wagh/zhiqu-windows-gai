@@ -1,0 +1,74 @@
+erDiagram
+    "用户 users" {
+        string id PK "编号"
+        string username UK "用户名"
+        string nickname "昵称"
+        string status "状态"
+    }
+    "学习内容 contents" {
+        string id PK "编号"
+        string category_id FK "分类编号"
+        string type "内容类型"
+        string title "标题"
+        string status "状态"
+    }
+    "AI助手会话 assistant_conversations" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string title "标题"
+        boolean memory_enabled "是否启用记忆"
+    }
+    "AI助手消息 assistant_messages" {
+        string id PK "编号"
+        string conversation_id FK "会话编号"
+        string author_user_id FK "作者用户编号"
+        string reply_to_message_id FK "回复消息编号"
+        string role "角色"
+        string safety_status "安全状态"
+    }
+    "AI助手记忆 assistant_memory" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string memory_key "记忆键"
+        boolean enabled "是否启用"
+    }
+    "AI助手推荐反馈 assistant_recommendation_events" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string conversation_id FK "会话编号"
+        string message_id FK "消息编号"
+        string content_id FK "内容编号"
+        string event_type "事件类型"
+    }
+    "单机游戏实例 single_player_game_instances" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string game_code "游戏代码"
+        int level_no "关卡序号"
+        string status "状态"
+    }
+    "单机游戏提交 single_player_game_submissions" {
+        string id PK "编号"
+        string instance_id FK "实例编号"
+        string round_id "回合编号"
+        string request_id UK "请求编号"
+    }
+    "单机游戏进度 single_player_game_progress" {
+        string user_id PK, FK "用户编号"
+        string game_code PK "游戏代码"
+        int level_no PK "关卡序号"
+        boolean completed "是否完成"
+    }
+
+    "用户 users" ||--o{ "AI助手会话 assistant_conversations" : "拥有"
+    "AI助手会话 assistant_conversations" ||--o{ "AI助手消息 assistant_messages" : "包含"
+    "用户 users" ||--o{ "AI助手消息 assistant_messages" : "撰写"
+    "AI助手消息 assistant_messages" ||--o| "AI助手消息 assistant_messages" : "回复"
+    "用户 users" ||--o{ "AI助手记忆 assistant_memory" : "存储"
+    "用户 users" ||--o{ "AI助手推荐反馈 assistant_recommendation_events" : "产生"
+    "AI助手会话 assistant_conversations" ||--o{ "AI助手推荐反馈 assistant_recommendation_events" : "关联会话"
+    "AI助手消息 assistant_messages" ||--o{ "AI助手推荐反馈 assistant_recommendation_events" : "触发"
+    "学习内容 contents" ||--o{ "AI助手推荐反馈 assistant_recommendation_events" : "推荐"
+    "用户 users" ||--o{ "单机游戏实例 single_player_game_instances" : "开始"
+    "单机游戏实例 single_player_game_instances" ||--o{ "单机游戏提交 single_player_game_submissions" : "接收"
+    "用户 users" ||--o{ "单机游戏进度 single_player_game_progress" : "记录"

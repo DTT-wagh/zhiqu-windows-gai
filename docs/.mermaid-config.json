@@ -1,0 +1,20 @@
+{
+  "theme": "default",
+  "er": {
+    "diagramPadding": 20,
+    "layoutDirection": "TB",
+    "minEntityWidth": 100,
+    "minEntityHeight": 75,
+    "entityPadding": 15,
+    "stroke": "#333",
+    "fill": "#f9f9f9",
+    "fontSize": 14
+  },
+  "flowchart": {
+    "diagramPadding": 20
+  },
+  "themeVariables": {
+    "fontFamily": "Segoe UI, Microsoft YaHei, sans-serif",
+    "fontSize": "14px"
+  }
+}

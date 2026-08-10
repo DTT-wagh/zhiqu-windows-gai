@@ -17,9 +17,10 @@ final class SoundConductorGenerator implements SinglePlayerGameGenerator {
             你为 6-12 岁儿童实时生成“声音小指挥”结构化无歌词乐段。不得引用现有歌曲、固定旋律、真实姓名或私人信息。
             前端会用 Web Audio API 合成，所以只能返回结构化音符，不返回音频 URL。tempo 50-170，meter 2-6，dynamics 只能 SOFT/MEDIUM/STRONG，instrumentFamily 使用 KEYS/STRINGS/WOODWIND/PERCUSSION，mood 使用适龄非恐怖词。
             只返回 JSON：safety、instruction、demo、恰好三个 rounds、result。demo 和每轮都含 sequence：{"tempo":整数,"dynamics":"...","instrumentFamily":"...","meter":整数,"mood":"...","notes":[{"midi":48到84,"beats":0.25到4}]}。
+            demo 只示范一个可测量特征。r1 让儿童选出 AI 测得的速度、力度、音色或节拍；r2 让儿童用可听证据核对感受，情绪可有多个合理答案；r3 只改变 tempo、dynamics、instrumentFamily 或 meter 中一个参数，比较改变前后。
             每轮还含 roundId、title、prompt、options。option 格式 {"id":"...","label":"...","value":"SLOW|MEDIUM|FAST|SOFT|STRONG|KEYS|...","kind":"CHOICE|MOOD|EVIDENCE","evidenceMetric":"TEMPO|DYNAMICS|INSTRUMENT|METER"}。
             answer 格式 {"questionType":"TEMPO|DYNAMICS|INSTRUMENT|METER|MOOD_EVIDENCE|CHANGE","changedMetric":"","hint":"引用本段参数的线索","feedback":"引用本段可观察证据的讲评","comparison":{},"ability":{}}。情绪题必须允许多个感受，只按是否选择速度、力度、音色或节拍证据判断。
-            result 的 discovery 和 limitation 必须根据本局实际参数生成。只返回 JSON，不要 Markdown。
+            result 的 evidence、aiCorrect、uncertain、change、discovery 和 limitation 必须根据本局实际参数生成。只返回 JSON，不要 Markdown。
             """;
 
     private final SinglePlayerAiClient client;
@@ -53,11 +54,31 @@ final class SoundConductorGenerator implements SinglePlayerGameGenerator {
         context.put("locale", "zh-CN");
         JsonNode generated = client.generateJson(SYSTEM_PROMPT, context);
         validator.validateSoundSequence(generated.path("demo").path("sequence"));
+        JsonNode rounds = generated.path("rounds");
+        if (!rounds.isArray() || rounds.size() != 3) throw invalid();
+        validateSingleSequenceChange(
+                rounds.path(1).path("sequence"),
+                rounds.path(2).path("sequence"),
+                rounds.path(2).path("answer").path("changedMetric").asText("")
+        );
         for (JsonNode round : generated.path("rounds")) {
             validator.validateSoundSequence(round.path("sequence"));
             deriveAnswer(round);
         }
         return validator.splitAndValidate(gameCode(), generated, client.modelName());
+    }
+
+    private void validateSingleSequenceChange(JsonNode before, JsonNode after, String declaredMetric) {
+        String changed = "";
+        int changes = 0;
+        for (String field : new String[]{"tempo", "dynamics", "instrumentFamily", "meter"}) {
+            if (!before.path(field).equals(after.path(field))) {
+                changes += 1;
+                changed = field.toUpperCase(Locale.ROOT).replace("INSTRUMENTFAMILY", "INSTRUMENT");
+            }
+        }
+        if (!before.path("notes").equals(after.path("notes"))) changes += 1;
+        if (changes != 1 || !changed.equals(declaredMetric.toUpperCase(Locale.ROOT))) throw invalid();
     }
 
     private void deriveAnswer(JsonNode round) {

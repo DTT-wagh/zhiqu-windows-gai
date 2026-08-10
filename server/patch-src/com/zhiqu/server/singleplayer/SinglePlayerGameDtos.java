@@ -14,15 +14,6 @@ public final class SinglePlayerGameDtos {
     private SinglePlayerGameDtos() {
     }
 
-    public record LevelSummary(
-            int levelNo,
-            String type,
-            String learningGoal,
-            String difficulty,
-            int estimatedMinutes
-    ) {
-    }
-
     public record GameSummary(
             String gameCode,
             String title,
@@ -31,13 +22,13 @@ public final class SinglePlayerGameDtos {
             String learningGoal,
             List<String> ageBands,
             int estimatedMinutes,
-            List<LevelSummary> levels
+            int levelNo
     ) {
     }
 
     public record CreateInstanceRequest(
             @NotBlank @Size(max = 36) String requestId,
-            @Min(1) @Max(12) int levelNo,
+            @Min(1) @Max(1) int levelNo,
             @Pattern(regexp = "6-8|9-10|11-12") String ageBand
     ) {
     }
@@ -90,7 +81,6 @@ public final class SinglePlayerGameDtos {
 
     public record ProgressView(
             String gameCode,
-            int levelNo,
             boolean completed,
             JsonNode ability,
             JsonNode bestResult,

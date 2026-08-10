@@ -2,7 +2,7 @@
   const ROOT_ID = 'zhiqu-social-chat-root';
   const STYLE_ID = 'zhiqu-social-chat-styles';
   const SESSION_KEY = 'zhiqu.auth.session.v1';
-  const API_BASE = String(globalThis.__ZHIQU_API_BASE_URL || '').replace(/\/+$/, '');
+  const API_BASE = String(globalThis.__ZHIQU_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '');
   const EMOJIS = [
     '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣',
     '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰',
@@ -137,6 +137,8 @@
       #${ROOT_ID} .zq-social-launcher button.secondary { background: #fffdfa; color: #365c8d; }
       #${ROOT_ID} .zq-social-unread { display: inline-grid; min-width: 18px; height: 18px; margin-left: 5px; padding: 0 4px; place-items: center; border-radius: 9px; background: #f05a4f; color: #fff; font-size: 11px; line-height: 18px; }
       #${ROOT_ID} .zq-social-backdrop { position: fixed; inset: 0; z-index: 2147483641; display: grid; place-items: center; padding: 24px; background: rgba(24, 36, 43, .42); }
+      #${ROOT_ID} .zq-social-backdrop-enter { animation: zq-social-backdrop-fade 280ms cubic-bezier(.2, .8, .25, 1) both; }
+      #${ROOT_ID} .zq-social-backdrop-enter .zq-social-panel { transform-origin: center; animation: zq-social-message-pop 280ms cubic-bezier(.2, .8, .25, 1) both; will-change: transform, opacity; }
       #${ROOT_ID} .zq-social-panel { display: grid; grid-template-columns: minmax(230px, 31%) minmax(0, 1fr); width: min(960px, 100%); height: min(680px, calc(100vh - 64px)); overflow: hidden; border: 1px solid #d8d0c1; border-radius: 14px; background: #fffdfa; box-shadow: 0 24px 70px rgba(28, 39, 46, .25); }
       #${ROOT_ID} .zq-social-panel:not(.zq-social-active-chat):not(.zq-social-search-panel) { height: min(520px, calc(100vh - 64px)); }
       #${ROOT_ID} .zq-social-sidebar { display: flex; min-width: 0; flex-direction: column; border-right: 1px solid #e4ddd1; background: #f7f4ec; }
@@ -163,9 +165,9 @@
       #${ROOT_ID} .zq-social-chat-header .zq-social-avatar img { width: 46px; height: 46px; }
       #${ROOT_ID} .zq-social-chat-header-main { display: flex; min-width: 0; align-items: center; gap: 10px; flex: 1; }
       #${ROOT_ID} .zq-social-chat-back { display: none; }
-      #${ROOT_ID} .zq-social-row-copy { min-width: 0; }
-      #${ROOT_ID} .zq-social-row-name { overflow: hidden; color: #243139; font-size: 14px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
-      #${ROOT_ID} .zq-social-row-preview { overflow: hidden; margin-top: 3px; color: #7a858c; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+      #${ROOT_ID} .zq-social-row-copy { display: grid; min-width: 0; gap: 2px; }
+      #${ROOT_ID} .zq-social-row-name { display: block; min-width: 0; overflow: hidden; color: #243139; font-size: 14px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+      #${ROOT_ID} .zq-social-row-preview { display: block; min-width: 0; overflow: hidden; color: #7a858c; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
       #${ROOT_ID} .zq-social-row-meta { color: #7a858c; font-size: 11px; white-space: nowrap; }
       #${ROOT_ID} .zq-social-unread-small { display: inline-grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border-radius: 9px; background: #f05a4f; color: #fff; font-size: 10px; font-weight: 800; }
       #${ROOT_ID} .zq-social-result { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 9px; border-bottom: 1px solid #e9e2d8; }
@@ -235,9 +237,14 @@
         80% { transform: scale(.98); }
         100% { opacity: 1; transform: scale(1); }
       }
+      @keyframes zq-social-backdrop-fade {
+        0% { background-color: rgba(24, 36, 43, 0); }
+        100% { background-color: rgba(24, 36, 43, .42); }
+      }
       @media (prefers-reduced-motion: reduce) {
         #${ROOT_ID} .zq-social-message-enter .zq-social-bubble, #${ROOT_ID} .zq-social-message-enter .zq-social-sticker-message { animation: none; }
         #${ROOT_ID} .zq-social-composer[data-has-content="true"] .zq-social-send { animation: none; }
+        #${ROOT_ID} .zq-social-backdrop-enter, #${ROOT_ID} .zq-social-backdrop-enter .zq-social-panel { animation: none; }
       }
       @media (max-width: 720px) {
         #${ROOT_ID} .zq-social-launcher { right: 14px; bottom: max(14px, env(safe-area-inset-bottom)); }
@@ -305,7 +312,7 @@
     root.querySelector('.zq-social-launcher')?.remove();
   }
 
-  function renderPanel(root) {
+  function renderPanel(root, options = {}) {
     const searchWasFocused = document.activeElement?.matches?.('[data-chat-search]');
     const searchSelection = searchWasFocused
       ? { start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd }
@@ -325,7 +332,7 @@
     const panelTitle = active ? '聊天' : '私聊';
     const panelSubtitle = active ? '和笔友继续交流学习' : '先添加笔友，成为好友后即可聊天';
     const panel = document.createElement('div');
-    panel.className = `zq-social-backdrop ${active ? 'zq-social-chat-backdrop' : ''}`;
+    panel.className = `zq-social-backdrop ${active ? 'zq-social-chat-backdrop' : ''} ${options.entering ? 'zq-social-backdrop-enter' : ''}`;
     panel.innerHTML = `
       <section class="zq-social-panel ${state.searchMode && !active ? 'zq-social-search-panel' : ''} ${active ? 'zq-social-active-chat' : ''}" role="dialog" aria-modal="true" aria-label="${panelTitle}">
         <aside class="zq-social-sidebar">
@@ -547,21 +554,43 @@
   async function sendMessage(form) {
     if (!state.activePartner) return;
     const input = form.querySelector('[data-chat-composer]');
-    const body = input?.value.trim() || '';
+    const originalDraft = input?.value || '';
+    const body = originalDraft.trim();
     if (!body) return;
     const submit = form.querySelector('button[type="submit"]');
-    await sendMessageBody(body, { pendingButton: submit, clearDraft: true });
+    const partnerId = state.activePartner.id;
+    const originalSelection = {
+      start: input?.selectionStart ?? originalDraft.length,
+      end: input?.selectionEnd ?? originalDraft.length,
+    };
+    state.composerDraft = '';
+    state.composerPartnerId = partnerId;
+    state.composerSelection = null;
+    state.composerPanel = null;
+    if (input) input.value = '';
+    form.dataset.hasContent = 'false';
+    const sent = await sendMessageBody(body, { pendingButton: submit });
+    if (sent || state.activePartner?.id !== partnerId) return;
+    const currentInput = document.getElementById(ROOT_ID)?.querySelector('[data-chat-composer]');
+    if (!(currentInput instanceof HTMLInputElement) || currentInput.value) return;
+    state.composerDraft = originalDraft;
+    state.composerPartnerId = partnerId;
+    state.composerSelection = originalSelection;
+    currentInput.value = originalDraft;
+    currentInput.closest('[data-chat-form]')?.setAttribute('data-has-content', 'true');
+    currentInput.focus();
+    currentInput.setSelectionRange(originalSelection.start, originalSelection.end);
   }
 
   async function sendMessageBody(body, options = {}) {
-    if (!state.activePartner || !body) return;
+    if (!state.activePartner || !body) return false;
     if (!isFriendPartner(state.activePartner)) {
       showError('双方成为好友后才能聊天');
-      return;
+      return false;
     }
     if (Array.from(body).length > 500) {
       showError('消息需为 1-500 个字符');
-      return;
+      return false;
     }
     const pendingButton = options.pendingButton;
     if (pendingButton) pendingButton.disabled = true;
@@ -570,20 +599,26 @@
         method: 'POST',
         body: JSON.stringify({ body, requestId: requestId() }),
       });
-      if (options.clearDraft) {
-        state.composerDraft = '';
-        state.composerSelection = null;
-        state.composerPanel = null;
+      if (sentMessage?.id && !state.messages.some((message) => message.id === sentMessage.id)) {
+        state.messages = [...state.messages, sentMessage];
       }
-      state.messages = await api(`/api/chat/conversations/${encodeURIComponent(state.activePartner.id)}/messages`) || state.messages;
-      state.conversations = await api('/api/chat/conversations') || state.conversations;
       state.enteringMessageId = sentMessage?.id || null;
       renderLauncher(ensureRoot());
       renderPanel(ensureRoot());
       state.enteringMessageId = null;
+      const [messagesResult, conversationsResult] = await Promise.allSettled([
+        api(`/api/chat/conversations/${encodeURIComponent(state.activePartner.id)}/messages`),
+        api('/api/chat/conversations'),
+      ]);
+      if (messagesResult.status === 'fulfilled') state.messages = messagesResult.value || state.messages;
+      if (conversationsResult.status === 'fulfilled') state.conversations = conversationsResult.value || state.conversations;
+      renderLauncher(ensureRoot());
+      renderPanel(ensureRoot());
+      return true;
     } catch (error) {
       showError(error.message);
       if (pendingButton) pendingButton.disabled = false;
+      return false;
     }
   }
 
@@ -592,7 +627,7 @@
     state.searchMode = Boolean(searchMode);
     state.error = '';
     const root = ensureRoot();
-    renderPanel(root);
+    renderPanel(root, { entering: true });
     if (searchMode) root.querySelector('[data-chat-search]')?.focus();
     window.clearInterval(state.pollTimer);
     state.pollTimer = window.setInterval(async () => {
@@ -609,8 +644,9 @@
 
   async function openChatForFriend(profileId, nickname) {
     const query = String(nickname || '').trim();
-    openPanel(true);
-    state.searchQuery = query;
+    openPanel(false);
+    state.searchMode = false;
+    state.searchQuery = '';
     state.searchResults = [];
     state.loading = true;
     renderPanel(ensureRoot());

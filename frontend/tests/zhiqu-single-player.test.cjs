@@ -47,8 +47,9 @@ const dataContext = {};
 vm.runInNewContext(fs.readFileSync(path.join(dist, 'single-player', 'game-data.js'), 'utf8'), dataContext);
 assert.equal(dataContext.ZhiquSinglePlayerData.list.length, 4, 'four games must be listed');
 for (const game of dataContext.ZhiquSinglePlayerData.list) {
-  assert.equal(game.levels.length, 12, `${game.gameCode} must expose 12 learning goals`);
-  assert.deepEqual([...new Set(game.levels.map((level) => level.levelNo))], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  assert.equal(game.levelNo, 1, `${game.gameCode} must expose one unified entry`);
+  assert.equal('levels' in game, false, `${game.gameCode} must not expose a level catalog`);
+  assert.ok(game.estimatedMinutes >= 5 && game.estimatedMinutes <= 8, `${game.gameCode} must fit one short session`);
 }
 
 const apiSource = fs.readFileSync(path.join(dist, 'single-player', 'api.js'), 'utf8');
@@ -59,7 +60,7 @@ const apiContext = {
     getItem(key) { return storage.get(key) || null; },
     setItem(key, value) { storage.set(key, value); },
   },
-  location: { pathname: '/single-player-game', search: '?game=prompt-writer&level=1' },
+  location: { pathname: '/single-player-game', search: '?game=prompt-writer' },
   crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
   AbortController,
   setTimeout,
@@ -103,18 +104,29 @@ const api = apiContext.ZhiquSinglePlayerApi;
     assert.ok(lobby.includes(gameCode), `${gameCode} card must be wired into the community lobby`);
   }
   assert.match(lobby, /\/single-player-game\?game=/, 'lobby cards must enter the standalone route');
+  assert.doesNotMatch(lobby, /[?&]level=|12 关/, 'lobby cards must not expose a level selector');
   assert.doesNotMatch(lobby, /敬请期待|aria-disabled', 'true'/, 'cards must no longer be placeholders');
 
   const css = fs.readFileSync(path.join(dist, 'single-player', 'game.css'), 'utf8');
   assert.match(css, /min-height: 44px/, 'touch targets must be at least 44px');
   assert.match(css, /@media \(max-width: 760px\)/, 'mobile layout must be explicit');
+  assert.match(css, /@media \(max-width: 430px\)/, '393px phone layout must have a dedicated breakpoint');
+  assert.match(css, /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/, 'phone intro steps must use a stable three-column grid');
+  assert.match(css, /\.sp-primary, \.sp-secondary \{ width: 100%; min-height: 52px; \}/, 'phone actions must fill the available row');
   assert.match(css, /prefers-reduced-motion/, 'reduced motion must be supported');
-  assert.match(shellSource, /本关内容暂时生成失败/, 'generation failure must be explicit');
+  assert.match(shellSource, /本局内容暂时生成失败/, 'generation failure must be explicit');
   assert.match(shellSource, /重试生成/, 'generation failure must offer retry');
   assert.match(shellSource, /返回大厅/, 'generation failure must offer lobby return');
+  assert.match(shellSource, /我看懂了/, 'the demo must lead into the three-round flow with one clear action');
+  assert.match(shellSource, /再玩一次/, 'the result must offer replay as the primary action');
+  assert.doesNotMatch(shellSource, /选择关卡|12 关可选|下一关/, 'the single-entry flow must not expose level navigation');
   assert.doesNotMatch(shellSource, /answerSpec|correctOptionIds|acceptedOptionIds/, 'answer specifications must not exist in frontend runtime');
 
-  console.log(JSON.stringify({ result: 'ok', checks: 58, games: 4, levels: 48 }));
+  const imageGame = fs.readFileSync(path.join(dist, 'single-player', 'image-detective.js'), 'utf8');
+  assert.match(imageGame, /beforeImageUrl/, 'the image game must compare the original and one-variable variant');
+  assert.match(imageGame, /afterImageUrl/, 'the image game must render the generated variant');
+
+  console.log(JSON.stringify({ result: 'ok', checks: 69, games: 4, entries: 4 }));
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

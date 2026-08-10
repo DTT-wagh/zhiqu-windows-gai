@@ -35,6 +35,10 @@ final class GameContentValidator {
         requireText(generated.path("instruction"), 240, "GAME_INSTRUCTION_INVALID");
         requireObject(generated.path("demo"), "GAME_DEMO_INVALID");
         requireObject(generated.path("result"), "GAME_RESULT_INVALID");
+        requireText(generated.path("result").path("evidence"), 500, "GAME_RESULT_INVALID");
+        requireText(generated.path("result").path("aiCorrect"), 500, "GAME_RESULT_INVALID");
+        requireText(generated.path("result").path("uncertain"), 500, "GAME_RESULT_INVALID");
+        requireText(generated.path("result").path("change"), 500, "GAME_RESULT_INVALID");
         requireText(generated.path("result").path("discovery"), 500, "GAME_RESULT_INVALID");
         requireText(generated.path("result").path("limitation"), 500, "GAME_RESULT_INVALID");
         JsonNode rounds = generated.path("rounds");
@@ -115,7 +119,7 @@ final class GameContentValidator {
     private void validateSafety(JsonNode safety) {
         String status = safety.isTextual() ? safety.asText("") : safety.path("status").asText("");
         if (!"SAFE".equalsIgnoreCase(status)) {
-            throw new GenerationFailure("AI_CONTENT_REJECTED", "本次内容未通过儿童安全审核", "REJECTED", false);
+            throw new GenerationFailure("AI_CONTENT_REJECTED", "本次内容未通过儿童安全审核", "REJECTED", true);
         }
     }
 
@@ -124,7 +128,7 @@ final class GameContentValidator {
         if (node.isTextual()) {
             String text = node.asText("");
             if (text.length() > 3000 || CONTACT.matcher(text).find() || UNSAFE.matcher(text).find()) {
-                throw new GenerationFailure("AI_CONTENT_REJECTED", "本次内容未通过儿童安全审核", "REJECTED", false);
+                throw new GenerationFailure("AI_CONTENT_REJECTED", "本次内容未通过儿童安全审核", "REJECTED", true);
             }
         }
         for (JsonNode child : node) scanStrings(child, depth + 1);

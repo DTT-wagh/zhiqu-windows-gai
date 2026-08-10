@@ -1,0 +1,88 @@
+erDiagram
+    "用户 users" {
+        string id PK "编号"
+        string username UK "用户名"
+        string nickname "昵称"
+        string status "状态"
+    }
+    "刷新令牌 refresh_tokens" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        datetime expires_at "过期时间"
+        datetime revoked_at "撤销时间"
+    }
+    "用户偏好 user_preferences" {
+        string user_id PK, FK "用户编号"
+        string student_stage "学生阶段"
+        boolean comfortable_display "舒适显示"
+        string subtitle_size "字幕字号"
+    }
+    "账号删除审计 account_deletion_audits" {
+        string request_id PK "请求编号"
+        string subject_hash UK "主体哈希"
+        string status "状态"
+    }
+    "课程分类 categories" {
+        string id PK "编号"
+        string slug UK "唯一标识"
+        string name "名称"
+        int sort_order "排序"
+    }
+    "学习内容 contents" {
+        string id PK "编号"
+        string category_id FK "分类编号"
+        string type "内容类型"
+        string title "标题"
+        string status "状态"
+    }
+    "标签 tags" {
+        string id PK "编号"
+        string slug UK "唯一标识"
+        string name "名称"
+    }
+    "内容适用阶段 content_stages" {
+        string content_id PK, FK "内容编号"
+        string student_stage PK "学生阶段"
+    }
+    "内容标签关联 content_tags" {
+        string content_id PK, FK "内容编号"
+        string tag_id PK, FK "字段：tag_id"
+        int sort_order "排序"
+    }
+    "收藏记录 favorites" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string content_id FK "内容编号"
+        datetime created_at "创建时间"
+    }
+    "观看记录 viewing_history" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string content_id FK "内容编号"
+        int progress_seconds "字段：progress_seconds"
+        boolean completed "是否完成"
+    }
+    "内容导入批次 content_import_batches" {
+        string id PK "编号"
+        string request_id UK "请求编号"
+        string content_id FK "内容编号"
+        string status "状态"
+    }
+    "每日知识 daily_facts" {
+        string id PK "编号"
+        string review_status "审核状态"
+        date active_from "字段：active_from"
+        boolean active "字段：active"
+    }
+
+    "用户 users" ||--o{ "刷新令牌 refresh_tokens" : "拥有"
+    "用户 users" ||--o| "用户偏好 user_preferences" : "配置"
+    "用户 users" ||--o{ "收藏记录 favorites" : "收藏"
+    "学习内容 contents" ||--o{ "收藏记录 favorites" : "被收藏"
+    "用户 users" ||--o{ "观看记录 viewing_history" : "观看"
+    "学习内容 contents" ||--o{ "观看记录 viewing_history" : "记录"
+    "课程分类 categories" ||--o{ "学习内容 contents" : "分类"
+    "学习内容 contents" ||--o{ "内容适用阶段 content_stages" : "适用"
+    "标签 tags" ||--o{ "内容标签关联 content_tags" : "标记"
+    "学习内容 contents" ||--o{ "内容标签关联 content_tags" : "已标记"
+    "学习内容 contents" ||--o{ "内容导入批次 content_import_batches" : "导入批次"

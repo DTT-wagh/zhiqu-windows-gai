@@ -9,7 +9,6 @@ import com.zhiqu.server.singleplayer.SinglePlayerGameDtos.FinishRequest;
 import com.zhiqu.server.singleplayer.SinglePlayerGameDtos.FinishView;
 import com.zhiqu.server.singleplayer.SinglePlayerGameDtos.GameSummary;
 import com.zhiqu.server.singleplayer.SinglePlayerGameDtos.InstanceView;
-import com.zhiqu.server.singleplayer.SinglePlayerGameDtos.LevelSummary;
 import com.zhiqu.server.singleplayer.SinglePlayerGameDtos.MutationRequest;
 import com.zhiqu.server.singleplayer.SinglePlayerGameDtos.ProgressView;
 import com.zhiqu.server.singleplayer.SinglePlayerGameDtos.RewardView;
@@ -24,7 +23,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.Period;
 import java.time.ZoneId;
-import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +43,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 @Service
 public class SinglePlayerGameService {
-    private static final String CONTENT_VERSION = "spg-v1";
+    private static final int SINGLE_LEVEL = 1;
+    private static final String CONTENT_VERSION = "spg-v2";
     private static final Duration INSTANCE_TTL = Duration.ofHours(24);
     private static final Pattern PRIVATE_TEXT = Pattern.compile(
             "(?i)(1[3-9]\\d{9}|[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}|QQ|微信|wechat|住址|学校|身份证)"
@@ -85,14 +85,24 @@ public class SinglePlayerGameService {
 
     List<ProgressView> progress(String userId) {
         requireUserId(userId);
-        return repository.listProgress(userId).stream().map(this::progressView).toList();
+        List<ProgressRow> rows = repository.listProgress(userId);
+        return DEFINITIONS.keySet().stream().map(gameCode -> rows.stream()
+                .filter(row -> gameCode.equals(row.gameCode()) && row.completed())
+                .max(Comparator.comparing(ProgressRow::updatedAt))
+                .map(this::progressView)
+                .orElseGet(() -> emptyProgress(gameCode))).toList();
     }
 
     InstanceView create(String userId, String gameCode, CreateInstanceRequest request) {
         requireUserId(userId);
         GameDefinition definition = definition(gameCode);
+        if (request.levelNo() != SINGLE_LEVEL) {
+            throw SinglePlayerGameErrors.badRequest(
+                    "SINGLE_PLAYER_LEVEL_INVALID", "每款单机游戏只有一个统一入口"
+            );
+        }
         repository.findByCreateRequest(userId, request.requestId()).ifPresent(existing -> {
-            if (!existing.gameCode().equals(gameCode) || existing.levelNo() != request.levelNo()) {
+            if (!existing.gameCode().equals(gameCode) || existing.levelNo() != SINGLE_LEVEL) {
                 throw SinglePlayerGameErrors.conflict(
                         "SINGLE_PLAYER_REQUEST_CONFLICT", "这个请求编号已经用于另一局游戏");
             }
@@ -109,7 +119,7 @@ public class SinglePlayerGameService {
                 instanceId,
                 userId,
                 gameCode,
-                request.levelNo(),
+                SINGLE_LEVEL,
                 ageBand,
                 UUID.randomUUID().toString(),
                 "GENERATING",
@@ -128,7 +138,7 @@ public class SinglePlayerGameService {
                 now
         );
         repository.insert(row);
-        schedule(row, definition.goal(request.levelNo()));
+        schedule(row, definition.learningGoal());
         return instance(userId, instanceId);
     }
 
@@ -140,17 +150,15 @@ public class SinglePlayerGameService {
     InstanceView retryGeneration(
             String userId,
             String instanceId,
-            MutationRequest request,
-            boolean regenerate
+            MutationRequest request
     ) {
         InstanceRow row = requireOwned(userId, instanceId);
         if (request.requestId().equals(row.generationRequestId())) return instanceView(row);
         boolean retryableState = List.of("FAILED", "REJECTED").contains(row.status());
-        boolean replaceableState = regenerate && "READY".equals(row.status()) && row.levelNo() == 12;
-        if (!retryableState && !replaceableState) {
+        if (!retryableState) {
             throw SinglePlayerGameErrors.conflict(
                     "SINGLE_PLAYER_REGENERATION_NOT_ALLOWED",
-                    regenerate ? "只有自由试玩台可以在准备完成后换一个" : "当前状态不能重试生成"
+                    "当前状态不能重试生成"
             );
         }
         SinglePlayerGameGenerator generator = generator(row.gameCode());
@@ -159,8 +167,20 @@ public class SinglePlayerGameService {
         String seed = UUID.randomUUID().toString();
         repository.markGenerating(row.id(), seed, request.requestId(), now.plus(INSTANCE_TTL), now);
         InstanceRow generating = requireOwned(userId, instanceId);
-        schedule(generating, definition(row.gameCode()).goal(row.levelNo()));
+        schedule(generating, definition(row.gameCode()).learningGoal());
         return instanceView(generating);
+    }
+
+    InstanceView regenerate(String userId, String instanceId, MutationRequest request) {
+        InstanceRow source = requireOwned(userId, instanceId);
+        if (!"COMPLETED".equals(source.status())) {
+            throw SinglePlayerGameErrors.conflict(
+                    "SINGLE_PLAYER_REGENERATION_NOT_ALLOWED", "完成本局后才能再玩一次"
+            );
+        }
+        return create(userId, source.gameCode(), new CreateInstanceRequest(
+                request.requestId(), SINGLE_LEVEL, source.ageBand()
+        ));
     }
 
     @Transactional
@@ -330,9 +350,13 @@ public class SinglePlayerGameService {
 
     private ProgressView progressView(ProgressRow row) {
         return new ProgressView(
-                row.gameCode(), row.levelNo(), row.completed(), readJson(row.abilityJson()),
+                row.gameCode(), row.completed(), readJson(row.abilityJson()),
                 row.bestResultJson() == null ? null : readJson(row.bestResultJson()), row.completedAt(), row.updatedAt()
         );
+    }
+
+    private ProgressView emptyProgress(String gameCode) {
+        return new ProgressView(gameCode, false, objectMapper.createObjectNode(), null, null, null);
     }
 
     private InstanceRow requireOwned(String userId, String instanceId) {
@@ -414,43 +438,22 @@ public class SinglePlayerGameService {
         definitions.put("prompt-writer", new GameDefinition(
                 "prompt-writer", "提示词小作家", "语文表达、阅读理解",
                 "观察 AI 如何从一句话中提取对象、动作、地点和条件。",
-                "比较原始信息、AI 提取结果与一次变量变化。", 8,
-                List.of(
-                        "观察 AI 怎样找出对象", "观察动作和结果形式怎样被提取", "比较地点信息是否明确",
-                        "观察数量或范围怎样改变判断", "检查先后顺序是否被读懂", "比较受众和语气信息",
-                        "找出让 AI 不确定的含糊词", "一次只改变一个条件并比较", "发现互相冲突的条件",
-                        "信息不足时先追问", "用证据比较两种表达", "综合观察 AI 提取与遗漏的信息"
-                )
+                "比较原始信息、AI 提取结果与一次信息变化。", 6
         ));
         definitions.put("image-detective", new GameDefinition(
                 "image-detective", "图片侦探", "美术、观察、空间关系",
-                "比较图片规格、视觉模型识别和自己的观察。",
-                "用主体、形状、位置和关系证据核对 AI 的观察。", 8,
-                List.of(
-                        "找出画面主体", "同时观察颜色与形状", "比较元素的位置", "用点数证据观察数量",
-                        "区分主体与背景", "观察主体由哪些形状构成", "核对元素之间的空间关系", "发现关键元素",
-                        "比较一个元素变化后的影响", "用位置和关系排除干扰", "用多条线索说明观察", "综合观察并改变一个画面变量"
-                )
+                "比较实际图片、视觉模型识别和自己的观察。",
+                "用主体、颜色、形状、位置和关系证据核对 AI 的识别。", 7
         ));
         definitions.put("sound-conductor", new GameDefinition(
                 "sound-conductor", "声音小指挥", "音乐、情绪表达",
                 "观察 AI 怎样测量速度、力度、音色与节拍，再推测感受。",
-                "用可听见、可看见的声音证据核对 AI 判断。", 8,
-                List.of(
-                        "听辨速度快慢", "听辨声音强弱", "把乐段与速度证据配对", "比较多档力度",
-                        "用速度或力度说明感受", "识别主要音色族", "比较节拍与场景", "同时观察两个声音特征",
-                        "根据限制比较配器", "只改变一个声音变量", "证据不足时保留不确定", "综合调整结构化乐段"
-                )
+                "用可听见、可看见的速度、力度、音色和节拍证据核对 AI 判断。", 6
         ));
         definitions.put("route-and-conditions", new GameDefinition(
                 "route-and-conditions", "路线与条件", "数学、逻辑",
-                "让程序读取抽象图的数字和限制，比较候选路线。",
-                "用确定性计算核对 AI 生成的路线条件。", 8,
-                List.of(
-                        "比较路线长短", "比较路线费用", "检查路线能否连通", "计算路线总长度",
-                        "计算路线总时间", "在安全限制下重新找路", "按费用而不是长度比较", "先读清两个条件",
-                        "在时间和费用之间取舍", "在三个条件下筛选路线", "发现路线指标缺失", "调节多个目标的权重"
-                )
+                "观察 AI 如何读取抽象图的节点、数字和限制条件。",
+                "读取路线数字与条件，用确定性计算核对选择。", 7
         ));
         return Map.copyOf(definitions);
     }
@@ -472,27 +475,12 @@ public class SinglePlayerGameService {
             String subject,
             String description,
             String learningGoal,
-            int estimatedMinutes,
-            List<String> goals
+            int estimatedMinutes
     ) {
-        String goal(int levelNo) {
-            if (levelNo < 1 || levelNo > goals.size()) {
-                throw SinglePlayerGameErrors.badRequest("SINGLE_PLAYER_LEVEL_INVALID", "请选择 1 到 12 关");
-            }
-            return goals.get(levelNo - 1);
-        }
-
         GameSummary summary() {
-            List<LevelSummary> levels = new ArrayList<>();
-            for (int index = 0; index < goals.size(); index += 1) {
-                int level = index + 1;
-                String type = level <= 2 ? "DEMO" : level <= 8 ? "BASIC" : level <= 11 ? "CHANGE" : "FREE_PLAY";
-                String difficulty = level <= 2 ? "BEGINNER" : level <= 8 ? "BASIC" : "ADVANCED";
-                levels.add(new LevelSummary(level, type, goals.get(index), difficulty, estimatedMinutes));
-            }
             return new GameSummary(
                     gameCode, title, subject, description, learningGoal,
-                    List.of("6-8", "9-10", "11-12"), estimatedMinutes, List.copyOf(levels)
+                    List.of("6-8", "9-10", "11-12"), estimatedMinutes, SINGLE_LEVEL
             );
         }
     }

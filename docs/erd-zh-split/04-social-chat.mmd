@@ -1,0 +1,116 @@
+erDiagram
+    "用户 users" {
+        string id PK "编号"
+        string username UK "用户名"
+        string nickname "昵称"
+        string status "状态"
+    }
+    "社交资料 social_profiles" {
+        string user_id PK, FK "用户编号"
+        string public_profile_id UK "公开资料编号"
+        string friend_code UK "好友码"
+    }
+    "好友请求 friend_requests" {
+        string id PK "编号"
+        string requester_id FK "请求者编号"
+        string recipient_id FK "接收者编号"
+        string status "状态"
+        string request_id UK "请求编号"
+    }
+    "好友关系 friendships" {
+        string id PK "编号"
+        string user_low_id FK "低位用户编号"
+        string user_high_id FK "高位用户编号"
+        string latest_request_id FK "最新请求编号"
+        string removed_by_user_id FK "移除者编号"
+        string status "状态"
+    }
+    "用户屏蔽 user_blocks" {
+        string id PK "编号"
+        string blocker_id FK "屏蔽者编号"
+        string blocked_id FK "被屏蔽者编号"
+        string request_id UK "请求编号"
+    }
+    "社交屏蔽请求 social_block_requests" {
+        string request_id PK "请求编号"
+        string blocker_id FK "屏蔽者编号"
+        string blocked_id FK "被屏蔽者编号"
+        string block_id FK "屏蔽记录编号"
+    }
+    "社交屏蔽请求锁 social_block_request_locks" {
+        string request_id PK "请求编号"
+        datetime created_at "创建时间"
+    }
+    "游戏邀请 game_invitations" {
+        string id PK "编号"
+        string inviter_id FK "邀请者编号"
+        string invitee_id FK "被邀请用户编号"
+        string friendship_id FK "好友关系编号"
+        string game_code "游戏代码"
+        string room_id "房间编号"
+        string status "状态"
+    }
+    "社区游戏大厅 community_game_listings" {
+        string id PK "编号"
+        string host_user_id FK "房主编号"
+        string joined_user_id FK "加入用户编号"
+        string game_code "游戏代码"
+        string room_id "房间编号"
+        string status "状态"
+    }
+    "通知 notifications" {
+        string id PK "编号"
+        string recipient_id FK "接收者编号"
+        string actor_id FK "操作者编号"
+        string reference_type "引用类型"
+        string reference_id "引用编号"
+    }
+    "通知发送队列 notification_outbox" {
+        string id PK "编号"
+        string recipient_id FK "接收者编号"
+        string aggregate_type "聚合类型"
+        string aggregate_id "聚合编号"
+        string status "状态"
+    }
+    "私聊会话 chat_conversations" {
+        string id PK "编号"
+        string user_low_id FK "低位用户编号"
+        string user_high_id FK "高位用户编号"
+    }
+    "私聊消息 chat_messages" {
+        string id PK "编号"
+        string conversation_id FK "会话编号"
+        string sender_id FK "发送者编号"
+        string request_id UK "请求编号"
+        string status "状态"
+    }
+    "私聊表情 chat_stickers" {
+        string id PK "编号"
+        string owner_id FK "所有者编号"
+        string storage_key "存储键"
+    }
+
+    "用户 users" ||--o| "社交资料 social_profiles" : "展示资料"
+    "用户 users" ||--o{ "好友请求 friend_requests" : "发起好友请求"
+    "用户 users" ||--o{ "好友请求 friend_requests" : "收到好友请求"
+    "用户 users" ||--o{ "好友关系 friendships" : "低位用户"
+    "用户 users" ||--o{ "好友关系 friendships" : "高位用户"
+    "好友请求 friend_requests" ||--o{ "好友关系 friendships" : "最新请求"
+    "用户 users" ||--o{ "好友关系 friendships" : "移除"
+    "用户 users" ||--o{ "用户屏蔽 user_blocks" : "屏蔽"
+    "用户 users" ||--o{ "用户屏蔽 user_blocks" : "被屏蔽"
+    "用户 users" ||--o{ "游戏邀请 game_invitations" : "发起邀请"
+    "用户 users" ||--o{ "游戏邀请 game_invitations" : "收到邀请"
+    "好友关系 friendships" ||--o{ "游戏邀请 game_invitations" : "基于好友关系"
+    "用户 users" ||--o{ "社区游戏大厅 community_game_listings" : "主持"
+    "用户 users" ||--o{ "社区游戏大厅 community_game_listings" : "加入"
+    "用户 users" ||--o{ "通知 notifications" : "接收"
+    "用户 users" ||--o{ "通知 notifications" : "触发动作"
+    "用户 users" ||--o{ "通知发送队列 notification_outbox" : "排入队列"
+    "用户 users" ||--o{ "社交屏蔽请求 social_block_requests" : "屏蔽"
+    "用户屏蔽 user_blocks" ||--o{ "社交屏蔽请求 social_block_requests" : "由屏蔽请求发起"
+    "用户 users" ||--o{ "私聊会话 chat_conversations" : "低位用户"
+    "用户 users" ||--o{ "私聊会话 chat_conversations" : "高位用户"
+    "私聊会话 chat_conversations" ||--o{ "私聊消息 chat_messages" : "包含"
+    "用户 users" ||--o{ "私聊消息 chat_messages" : "发送"
+    "用户 users" ||--o{ "私聊表情 chat_stickers" : "拥有"

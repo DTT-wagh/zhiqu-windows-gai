@@ -11,5 +11,5 @@ assert.match(fixSource, /\.zq-ai-composer\{background:#f7f4ec!important\}/);
 assert.match(fixSource, /\.zq-ai-global-nav\{box-shadow:none!important\}/);
 assert.match(fixSource, /@media \(min-width:761px\)\{\.zq-ai-sidebar\{margin-bottom:calc\(-1 \* var\(--zq-ai-nav-height\)\)!important\}\}/);
 assert.match(serverSource, /navBackgroundScript/);
-assert.match(serverSource, /const tailScripts = standaloneSinglePlayer \? '' : navBackgroundScript/);
+assert.match(serverSource, /const tailScripts = standaloneSinglePlayer \? '' : `\$\{rewardsBackScript\}\$\{navBackgroundScript\}`/);
 console.log('nav background patch contract: ok');

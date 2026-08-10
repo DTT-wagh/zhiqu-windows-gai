@@ -1,0 +1,144 @@
+erDiagram
+    "用户 users" {
+        string id PK "编号"
+        string username UK "用户名"
+        string nickname "昵称"
+        string status "状态"
+    }
+    "学习内容 contents" {
+        string id PK "编号"
+        string category_id FK "分类编号"
+        string type "内容类型"
+        string title "标题"
+        string status "状态"
+    }
+    "游戏内容关联 game_content_links" {
+        string id PK "编号"
+        string game_code "游戏代码"
+        string content_id FK "内容编号"
+        int sort_order "排序"
+    }
+    "魔法游戏房间 magic_game_rooms" {
+        string id PK "编号"
+        string mentor_user_id FK "导师用户编号"
+        string novice_user_id FK "新手用户编号"
+        string next_room_id "下一房间编号"
+        string status "状态"
+    }
+    "盲盒任务 blind_box_tasks" {
+        string id PK "编号"
+        string source "来源"
+        string sketch_url "草图地址"
+    }
+    "盲盒房间 blind_box_rooms" {
+        string id PK "编号"
+        string boss_user_id FK "老板用户编号"
+        string designer_user_id FK "设计师用户编号"
+        string task_id FK "任务编号"
+        string next_room_id "下一房间编号"
+        string status "状态"
+    }
+    "谁是卧底房间 truth_game_rooms" {
+        string id PK "编号"
+        string undercover_user_id FK "卧底用户编号"
+        string detective_user_id FK "侦探用户编号"
+        string evidence_message_id "证据消息编号"
+        string next_room_id "下一房间编号"
+        string status "状态"
+    }
+    "卧底游戏消息 truth_game_messages" {
+        string id PK "编号"
+        string room_id FK "房间编号"
+        int round_number "回合数"
+        string speaker "字段：speaker"
+    }
+    "越狱游戏房间 jailbreak_game_rooms" {
+        string id PK "编号"
+        string host_user_id FK "房主编号"
+        string resolving_attempt_id "结算尝试编号"
+        string status "状态"
+    }
+    "越狱游戏成员 jailbreak_game_members" {
+        string id PK "编号"
+        string room_id FK "房间编号"
+        string user_id FK "用户编号"
+        string role "角色"
+    }
+    "越狱游戏音频 jailbreak_game_audio" {
+        string id PK "编号"
+        string room_id FK "房间编号"
+        string sender_user_id "发送者用户编号"
+        int round_number "回合数"
+    }
+    "越狱游戏尝试 jailbreak_game_attempts" {
+        string id PK "编号"
+        string room_id FK "房间编号"
+        string operator_user_id "操作用户编号"
+        int round_number "回合数"
+    }
+    "越狱游戏动作 jailbreak_game_actions" {
+        string request_id PK "请求编号"
+        string room_id FK "房间编号"
+        string user_id FK "用户编号"
+        string action_type "动作类型"
+    }
+    "游戏交互安全检查 game_interaction_safety_checks" {
+        string id PK "编号"
+        string game_code "游戏代码"
+        string room_id "房间编号"
+        string sender_user_id FK "发送者用户编号"
+        string status "状态"
+    }
+    "游戏邀请 game_invitations" {
+        string id PK "编号"
+        string inviter_id FK "邀请者编号"
+        string invitee_id FK "被邀请用户编号"
+        string friendship_id FK "好友关系编号"
+        string game_code "游戏代码"
+        string room_id "房间编号"
+        string status "状态"
+    }
+    "社区游戏大厅 community_game_listings" {
+        string id PK "编号"
+        string host_user_id FK "房主编号"
+        string joined_user_id FK "加入用户编号"
+        string game_code "游戏代码"
+        string room_id "房间编号"
+        string status "状态"
+    }
+
+    "学习内容 contents" ||--o{ "游戏内容关联 game_content_links" : "关联"
+    "用户 users" ||--o{ "魔法游戏房间 magic_game_rooms" : "参与魔法游戏"
+    "用户 users" ||--o{ "盲盒房间 blind_box_rooms" : "参与盲盒游戏"
+    "盲盒任务 blind_box_tasks" ||--o{ "盲盒房间 blind_box_rooms" : "使用"
+    "用户 users" ||--o{ "谁是卧底房间 truth_game_rooms" : "参与卧底游戏"
+    "谁是卧底房间 truth_game_rooms" ||--o{ "卧底游戏消息 truth_game_messages" : "包含"
+    "用户 users" ||--o{ "越狱游戏房间 jailbreak_game_rooms" : "主持"
+    "越狱游戏房间 jailbreak_game_rooms" ||--o{ "越狱游戏成员 jailbreak_game_members" : "包含成员"
+    "用户 users" ||--o{ "越狱游戏成员 jailbreak_game_members" : "参与"
+    "越狱游戏房间 jailbreak_game_rooms" ||--o{ "越狱游戏音频 jailbreak_game_audio" : "包含"
+    "越狱游戏房间 jailbreak_game_rooms" ||--o{ "越狱游戏尝试 jailbreak_game_attempts" : "包含"
+    "越狱游戏房间 jailbreak_game_rooms" ||--o{ "越狱游戏动作 jailbreak_game_actions" : "记录"
+    "用户 users" ||--o{ "越狱游戏动作 jailbreak_game_actions" : "执行"
+    "用户 users" ||--o{ "游戏邀请 game_invitations" : "发起邀请"
+    "用户 users" ||--o{ "游戏邀请 game_invitations" : "收到邀请"
+    "用户 users" ||--o{ "社区游戏大厅 community_game_listings" : "主持"
+    "用户 users" ||--o{ "社区游戏大厅 community_game_listings" : "加入"
+    "用户 users" ||--o{ "游戏交互安全检查 game_interaction_safety_checks" : "发送"
+    "魔法游戏房间 magic_game_rooms" ||--o{ "魔法游戏房间 magic_game_rooms" : "下一房间（逻辑）"
+    "盲盒房间 blind_box_rooms" ||--o{ "盲盒房间 blind_box_rooms" : "下一房间（逻辑）"
+    "谁是卧底房间 truth_game_rooms" ||--o{ "谁是卧底房间 truth_game_rooms" : "下一房间（逻辑）"
+    "谁是卧底房间 truth_game_rooms" ||--o{ "卧底游戏消息 truth_game_messages" : "证据消息（逻辑）"
+    "越狱游戏房间 jailbreak_game_rooms" ||--o{ "越狱游戏尝试 jailbreak_game_attempts" : "结算尝试（逻辑）"
+    "游戏邀请 game_invitations" ||--o{ "魔法游戏房间 magic_game_rooms" : "房间关联（逻辑）"
+    "游戏邀请 game_invitations" ||--o{ "盲盒房间 blind_box_rooms" : "房间关联（逻辑）"
+    "游戏邀请 game_invitations" ||--o{ "谁是卧底房间 truth_game_rooms" : "房间关联（逻辑）"
+    "游戏邀请 game_invitations" ||--o{ "越狱游戏房间 jailbreak_game_rooms" : "房间关联（逻辑）"
+    "社区游戏大厅 community_game_listings" ||--o{ "魔法游戏房间 magic_game_rooms" : "房间关联（逻辑）"
+    "社区游戏大厅 community_game_listings" ||--o{ "盲盒房间 blind_box_rooms" : "房间关联（逻辑）"
+    "社区游戏大厅 community_game_listings" ||--o{ "谁是卧底房间 truth_game_rooms" : "房间关联（逻辑）"
+    "社区游戏大厅 community_game_listings" ||--o{ "越狱游戏房间 jailbreak_game_rooms" : "房间关联（逻辑）"
+    "游戏交互安全检查 game_interaction_safety_checks" ||--o{ "魔法游戏房间 magic_game_rooms" : "房间关联（逻辑）"
+    "游戏交互安全检查 game_interaction_safety_checks" ||--o{ "盲盒房间 blind_box_rooms" : "房间关联（逻辑）"
+    "游戏交互安全检查 game_interaction_safety_checks" ||--o{ "谁是卧底房间 truth_game_rooms" : "房间关联（逻辑）"
+    "游戏交互安全检查 game_interaction_safety_checks" ||--o{ "越狱游戏房间 jailbreak_game_rooms" : "房间关联（逻辑）"

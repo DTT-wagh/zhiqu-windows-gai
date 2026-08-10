@@ -24,6 +24,10 @@
     {
       "name": "single-player-games",
       "script": "server/patch-src/patch-single-player-games.cjs"
+    },
+    {
+      "name": "hot-ranking",
+      "script": "server/patch-src/patch-hot-ranking.cjs"
     }
   ]
 }

@@ -124,7 +124,20 @@
   };
 
   window.__zqGuestLearning = function (requestPath) {
-    return loadCatalog().then(function (catalog) {
+    var hotRequest = typeof window.__zqHotRecommendations === 'function'
+      ? window.__zqHotRecommendations()
+      : Promise.resolve([]);
+    return Promise.all([loadCatalog(), hotRequest]).then(function (result) {
+      var catalog = result[0];
+      var hotCourses = (Array.isArray(result[1]) ? result[1] : []).map(function (item) {
+        return Object.assign({}, item, {
+          tags: Array.isArray(item.tags) ? item.tags : [],
+          learningStatus: 'NOT_STARTED',
+          progressSeconds: 0,
+          favorite: false,
+          matchReasons: []
+        });
+      });
       var requestedCategory = new URLSearchParams(String(requestPath || '').split('?')[1] || '').get('category');
       var categorySlug = requestedCategory || (catalog.categories[0] && catalog.categories[0].slug) || '';
       var courses = catalog.contents.map(function (item) { return toCourse(item, catalog.categories); });
@@ -133,7 +146,7 @@
         category: categorySlug,
         categories: catalog.categories,
         dailyFact: null,
-        featured: courses.slice(0, 6),
+        featured: hotCourses.length ? hotCourses : courses.slice(0, 6),
         newest: courses.slice(0, 6),
         categoryProgress: { categorySlug: categorySlug, completedLessons: 0, totalLessons: categoryCourses.length, percent: 0 },
         courses: categoryCourses

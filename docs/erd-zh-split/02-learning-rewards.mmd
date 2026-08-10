@@ -1,0 +1,156 @@
+erDiagram
+    "用户 users" {
+        string id PK "编号"
+        string username UK "用户名"
+        string nickname "昵称"
+        string status "状态"
+    }
+    "学习内容 contents" {
+        string id PK "编号"
+        string category_id FK "分类编号"
+        string type "内容类型"
+        string title "标题"
+        string status "状态"
+    }
+    "标签 tags" {
+        string id PK "编号"
+        string slug UK "唯一标识"
+        string name "名称"
+    }
+    "学习任务 learning_tasks" {
+        string id PK "编号"
+        string slug UK "唯一标识"
+        string title "标题"
+        boolean active "字段：active"
+    }
+    "任务选项 task_items" {
+        string id PK "编号"
+        string task_id FK "任务编号"
+        string item_type "选项类型"
+        string item_value "选项内容"
+    }
+    "导师房间 mentor_rooms" {
+        string id PK "编号"
+        string task_id FK "任务编号"
+        string mentor_user_id FK "导师用户编号"
+        string novice_user_id FK "新手用户编号"
+        string status "状态"
+    }
+    "任务提交 task_submissions" {
+        string id PK "编号"
+        string room_id FK "房间编号"
+        string novice_user_id FK "新手用户编号"
+        string request_id UK "请求编号"
+    }
+    "导师评价 mentor_reviews" {
+        string id PK "编号"
+        string room_id FK "房间编号"
+        string mentor_user_id FK "导师用户编号"
+        string request_id UK "请求编号"
+    }
+    "学习结果 learning_results" {
+        string id PK "编号"
+        string room_id FK "房间编号"
+        string badge_code "徽章代码"
+    }
+    "视频资源 video_assets" {
+        string id PK "编号"
+        string content_id FK, UK "内容编号"
+        string provider "媒体服务商"
+        int duration_seconds "时长（秒）"
+    }
+    "字幕轨道 subtitle_tracks" {
+        string id PK "编号"
+        string content_id FK "内容编号"
+        string language "语言"
+        string review_status "审核状态"
+    }
+    "视频章节 video_chapters" {
+        string id PK "编号"
+        string content_id FK "内容编号"
+        int start_seconds "开始秒数"
+        string title "标题"
+    }
+    "AI透明度说明 ai_transparency_cards" {
+        string id PK "编号"
+        string content_id FK, UK "内容编号"
+        string review_status "审核状态"
+    }
+    "视频测验 video_quizzes" {
+        string id PK "编号"
+        string content_id FK "内容编号"
+        string knowledge_tag_id FK "知识标签编号"
+        int trigger_seconds "触发秒数"
+    }
+    "测验选项 video_quiz_options" {
+        string id PK "编号"
+        string quiz_id FK "测验编号"
+        string option_key "选项键"
+        boolean correct "是否正确"
+    }
+    "测验作答 quiz_attempts" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string quiz_id FK "测验编号"
+        string option_id FK "选项编号"
+        boolean correct "是否正确"
+    }
+    "错题记录 wrong_answers" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string quiz_id FK "测验编号"
+        datetime mastered_at "掌握时间"
+    }
+    "进度更新请求 progress_update_requests" {
+        string request_id PK "请求编号"
+        string user_id FK "用户编号"
+        string content_id FK "内容编号"
+        int resulting_progress_seconds "结果进度秒数"
+        boolean resulting_completed "结果是否完成"
+    }
+    "经验值流水 xp_ledger" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string event_type "事件类型"
+        int awarded_amount "实际奖励数量"
+    }
+    "成就定义 achievements" {
+        string id PK "编号"
+        string code UK "代码"
+        string name "名称"
+        boolean active "字段：active"
+    }
+    "用户成就 user_achievements" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string achievement_id FK "成就编号"
+        string source_event_id FK "来源事件编号"
+    }
+
+    "学习任务 learning_tasks" ||--o{ "任务选项 task_items" : "包含"
+    "学习任务 learning_tasks" ||--o{ "导师房间 mentor_rooms" : "用于"
+    "用户 users" ||--o{ "导师房间 mentor_rooms" : "担任导师"
+    "用户 users" ||--o{ "导师房间 mentor_rooms" : "加入"
+    "导师房间 mentor_rooms" ||--o| "任务提交 task_submissions" : "接收"
+    "用户 users" ||--o{ "任务提交 task_submissions" : "提交"
+    "导师房间 mentor_rooms" ||--o| "导师评价 mentor_reviews" : "由导师评价"
+    "用户 users" ||--o{ "导师评价 mentor_reviews" : "评价"
+    "导师房间 mentor_rooms" ||--o| "学习结果 learning_results" : "产生"
+    "学习内容 contents" ||--o| "视频资源 video_assets" : "包含视频资源"
+    "学习内容 contents" ||--o{ "字幕轨道 subtitle_tracks" : "包含字幕"
+    "学习内容 contents" ||--o{ "视频章节 video_chapters" : "包含章节"
+    "学习内容 contents" ||--o| "AI透明度说明 ai_transparency_cards" : "说明"
+    "学习内容 contents" ||--o{ "视频测验 video_quizzes" : "测试"
+    "标签 tags" ||--o{ "视频测验 video_quizzes" : "知识标签"
+    "视频测验 video_quizzes" ||--o{ "测验选项 video_quiz_options" : "提供选项"
+    "用户 users" ||--o{ "测验作答 quiz_attempts" : "作答"
+    "视频测验 video_quizzes" ||--o{ "测验作答 quiz_attempts" : "对应测验"
+    "测验选项 video_quiz_options" ||--o{ "测验作答 quiz_attempts" : "选择"
+    "用户 users" ||--o{ "错题记录 wrong_answers" : "拥有"
+    "视频测验 video_quizzes" ||--o{ "错题记录 wrong_answers" : "记录"
+    "用户 users" ||--o{ "进度更新请求 progress_update_requests" : "更新"
+    "学习内容 contents" ||--o{ "进度更新请求 progress_update_requests" : "记录进度"
+    "用户 users" ||--o{ "经验值流水 xp_ledger" : "获得"
+    "用户 users" ||--o{ "用户成就 user_achievements" : "获得成就"
+    "成就定义 achievements" ||--o{ "用户成就 user_achievements" : "定义"
+    "经验值流水 xp_ledger" ||--o{ "用户成就 user_achievements" : "来源"

@@ -38,6 +38,51 @@ const recommendationsScript = '<script src="/zhiqu-recommendations.js"></script>
 const guestAccessScript = '<script src="/zhiqu-guest-access.js"></script>';
 const aiAssistantScript = '<script src="/zhiqu-ai-assistant.js"></script>';
 const navBackgroundScript = '<script src="/zhiqu-nav-background.js"></script>';
+const rewardsBackScript = '<script src="/zhiqu-rewards-back.js"></script>';
+const magicReferenceScript = '<script src="/magic-reference.js"></script>';
+const magicLandscapeScript = `<style id="zq-magic-landscape">
+  @media (orientation: portrait) {
+    html, body { overflow: hidden; }
+    body[data-zq-magic-landscape] #root {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      width: 100vw;
+      height: 100vh;
+      max-width: none;
+      max-height: none;
+      transform: translate(-50%, -50%) rotate(90deg);
+      transform-origin: center center;
+    }
+    body[data-zq-magic-lobby][data-zq-magic-landscape] #root {
+      width: 100vh;
+      height: 100vw;
+    }
+  }
+</style><script>(() => {
+  const lockLandscape = () => {
+    try {
+      const orientation = globalThis.screen?.orientation;
+      if (typeof orientation?.lock === 'function') {
+        Promise.resolve(orientation.lock('landscape')).catch(() => {});
+      }
+    } catch {}
+  };
+  const syncMagicLandscape = () => {
+    const pathname = globalThis.location?.pathname || '';
+    const pathParts = pathname.split('/').filter(Boolean);
+    const isMagicRoute = pathname === '/magic' || (pathParts.length === 2 && pathParts[0] === 'magic');
+    const isMagicLobby = pathname === '/magic';
+    document.body?.toggleAttribute('data-zq-magic-landscape', isMagicRoute);
+    document.body?.toggleAttribute('data-zq-magic-lobby', isMagicLobby);
+    if (isMagicRoute) lockLandscape();
+  };
+  syncMagicLandscape();
+  globalThis.setInterval(syncMagicLandscape, 200);
+  globalThis.addEventListener('pointerdown', () => {
+    if (document.body?.hasAttribute('data-zq-magic-landscape')) lockLandscape();
+  }, { passive: true });
+})();</script>`;
 const apiBaseUrl = String(process.env.ZHIQU_API_BASE_URL || '').trim().replace(/\/+$/, '');
 const apiConfigScript = `<script>globalThis.__ZHIQU_API_BASE_URL=${JSON.stringify(apiBaseUrl).replace(/</g, '\\u003c')};</script>`;
 const askThemeToggleSource = 'function(e){oe(()=>{s(e),B(""),Q([])})';
@@ -64,6 +109,40 @@ const settingsLogoutSource = "async function J(){if(!o){n(!0);try{await e(),t.ro
 const settingsLogoutPatched = "async function J(){if(!o){n(!0);try{await e();globalThis.location.replace('/')}finally{n(!1)}}}";
 const apiGuestAccessSource = ",'required'===n&&!l)throw new c(401,{code:'UNAUTHORIZED',message:'\\u8bf7\\u5148\\u767b\\u5f55'});";
 const apiGuestAccessPatched = ",'required'===n&&!l){const r=globalThis.__zqGuestApiRequest?.(e,t);if(r)return r;if('GET'!==String(t.method||'GET').toUpperCase())globalThis.__zqRequireLogin?.();throw new c(401,{code:'UNAUTHORIZED',message:'\\u8bf7\\u5148\\u767b\\u5f55'});}";
+const magicImageFrameSource = "imageFrame:{overflow:'hidden',aspectRatio:1,borderRadius:8,borderWidth:4";
+const magicImageFramePatched = "imageFrame:{overflow:'hidden',width:'48%',flexShrink:0,aspectRatio:1.7777777777777777,borderRadius:8,borderWidth:4";
+const magicImageFrameCompactSource = "imageFrameCompact:{width:'100%',aspectRatio:1,borderWidth:2}";
+const magicImageFrameCompactPatched = "imageFrameCompact:{width:'100%',aspectRatio:1.7777777777777777,borderWidth:2}";
+const magicImageFallbackSource = "imageFallback:{minHeight:280,alignItems:'center',justifyContent:'center'";
+const magicImageFallbackPatched = "imageFallback:{width:'48%',flexShrink:0,minHeight:180,aspectRatio:1.7777777777777777,alignItems:'center',justifyContent:'center'";
+const magicImageFallbackCompactSource = "imageFallbackCompact:{minHeight:130,borderWidth:2}";
+const magicImageFallbackCompactPatched = "imageFallbackCompact:{width:'100%',minHeight:96,aspectRatio:1.7777777777777777,borderWidth:2}";
+const magicPlayScrollSource = "scroll:{flexGrow:1,width:'100%',maxWidth:720,alignSelf:'center',padding:16,paddingBottom:44,gap:20}";
+const magicPlayScrollPatched = "scroll:{flexGrow:1,width:'100%',maxWidth:1200,alignSelf:'center',padding:24,paddingBottom:56,gap:18}";
+const magicGameGapSource = "gameGap:{gap:18}";
+const magicGameGapPatched = "gameGap:{flexDirection:'row',alignItems:'flex-start',gap:18}";
+const magicSpellBookSource = "spellBook:{position:'relative',gap:17,padding:18";
+const magicSpellBookPatched = "spellBook:{flex:1,minWidth:0,position:'relative',gap:17,padding:18";
+const magicSafeSource = "safe:{flex:1,backgroundColor:'#2B164D'}";
+const magicSafePatched = "safe:{flex:1,backgroundColor:'#2B164D',backgroundImage:\"url('/assets/assets/images/bag1.png')\",backgroundSize:'cover',backgroundPosition:'center'}";
+const gameCancelNavigationPatches = [
+  [
+    'M=e=>{w(e),n.router.replace("/blind-box")}',
+    'M=e=>{w(e),globalThis.location.replace("/community?section=games")}',
+  ],
+  [
+    'onSuccess:e=>{me(e),n.router.replace("/jailbreak-game")}',
+    'onSuccess:e=>{me(e),globalThis.location.replace("/community?section=games")}',
+  ],
+  [
+    'me=e=>{ce(h,c,e),l.router.replace("/magic")}',
+    'me=e=>{ce(h,c,e),globalThis.location.replace("/community?section=games")}',
+  ],
+  [
+    'rt=e=>{pe(e),l.router.replace("/truth-game")}',
+    'rt=e=>{pe(e),globalThis.location.replace("/community?section=games")}',
+  ],
+];
 const rootSessionRedirectSource = 'const b=f?"/(tabs)":"/login"';
 const rootSessionRedirectPatched = 'const b="/(tabs)"';
 const tabsSessionGuardSource = 'if(!s){let t;return e[1]===Symbol.for("react.memo_cache_sentinel")?(t=(0,k.jsx)(n.Redirect,{href:"/login"}),e[1]=t):t=e[1],t}';
@@ -185,6 +264,17 @@ const server = http.createServer((request, response) => {
       source = source.replace(guestProfileRewardsSource, guestProfileRewardsPatched);
       source = source.replace(guestProfileSocialSource, guestProfileSocialPatched);
       source = source.replace(guestProfileEditSource, guestProfileEditPatched);
+      source = source.replace(magicImageFrameSource, magicImageFramePatched);
+      source = source.replace(magicImageFrameCompactSource, magicImageFrameCompactPatched);
+      source = source.replace(magicImageFallbackSource, magicImageFallbackPatched);
+      source = source.replace(magicImageFallbackCompactSource, magicImageFallbackCompactPatched);
+      source = source.replace(magicPlayScrollSource, magicPlayScrollPatched);
+      source = source.replace(magicGameGapSource, magicGameGapPatched);
+      source = source.replace(magicSpellBookSource, magicSpellBookPatched);
+      source = source.replaceAll(magicSafeSource, magicSafePatched);
+      for (const [cancelSource, cancelPatched] of gameCancelNavigationPatches) {
+        source = source.replace(cancelSource, cancelPatched);
+      }
       body = Buffer.from(source);
     }
     if (path.extname(file).toLowerCase() === '.html') {
@@ -202,8 +292,11 @@ const server = http.createServer((request, response) => {
       if (!standaloneAssistant && !standaloneSinglePlayer && !html.includes('src="/zhiqu-recommendations.js"')) {
         html = html.replace('</head>', `${recommendationsScript}</head>`);
       }
-      const tailScripts = standaloneSinglePlayer ? '' : navBackgroundScript;
-      body = Buffer.from(html.replace('</body>', `${scripts.join('')}${tailScripts}</body>`));
+      const tailScripts = standaloneSinglePlayer ? '' : `${rewardsBackScript}${navBackgroundScript}`;
+      const requestPathname = decodeURIComponent((request.url || '/').split('?')[0]);
+      const magicRouteScript = standaloneAssistant || standaloneSinglePlayer ? '' : magicLandscapeScript;
+      const magicLobbyScript = standaloneAssistant || standaloneSinglePlayer ? '' : magicReferenceScript;
+      body = Buffer.from(html.replace('</body>', `${scripts.join('')}${magicRouteScript}${magicLobbyScript}${tailScripts}</body>`));
     }
     response.writeHead(200, {
       'Content-Type': mime[path.extname(file).toLowerCase()] || 'application/octet-stream',

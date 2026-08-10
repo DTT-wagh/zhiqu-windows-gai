@@ -2,15 +2,28 @@
   'use strict';
   global.ZhiquSinglePlayerGames = global.ZhiquSinglePlayerGames || {};
 
-  function image(container, content) {
+  function image(container, content, label) {
     var figure = document.createElement('figure');
-    figure.className = 'sp-workspace';
+    figure.className = 'sp-image-figure';
     var element = document.createElement('img');
     element.className = 'sp-generated-image';
     element.src = global.ZhiquSinglePlayerApi.mediaUrl(content.imageUrl || '');
     element.alt = content.altText || '本局由 AI 实时生成并经过视觉模型核验的插画';
     figure.appendChild(element);
+    if (label) {
+      var caption = document.createElement('figcaption');
+      caption.textContent = label;
+      figure.appendChild(caption);
+    }
     container.appendChild(figure);
+  }
+
+  function imageComparison(container, round) {
+    var comparison = document.createElement('div');
+    comparison.className = 'sp-image-comparison';
+    image(comparison, { imageUrl: round.beforeImageUrl, altText: round.beforeAltText }, '改变前');
+    image(comparison, { imageUrl: round.afterImageUrl, altText: round.afterAltText }, '改变后');
+    container.appendChild(comparison);
   }
 
   function detections(container, values) {
@@ -42,8 +55,9 @@
   }
 
   function renderRound(container, round, context) {
-    image(container, round);
-    detections(container, context.content.aiDetected);
+    if (round.beforeImageUrl && round.afterImageUrl) imageComparison(container, round);
+    else image(container, round);
+    detections(container, round.afterImageUrl ? context.content.variantAiDetected : context.content.aiDetected);
     context.renderOptions(container, round.options || []);
   }
 

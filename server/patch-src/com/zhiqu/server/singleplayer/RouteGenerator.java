@@ -29,8 +29,8 @@ final class RouteGenerator implements SinglePlayerGameGenerator {
     private static final String SYSTEM_PROMPT = """
             你只为 6-12 岁儿童生成抽象路线图和任务条件 JSON，不能判断答案、不能计算最优路线、不能生成真实地址或导航建议。
             只返回 {"safety":{"status":"SAFE|REJECTED","reason":"..."},"themeLabel":"虚构短名称","graph":{"startId":"A","endId":"D","nodes":[{"id":"A","label":"虚构地点","x":0到100,"y":0到100}],"edges":[{"id":"e1","from":"A","to":"B","distance":非负数或null,"time":非负数或null,"cost":非负数或null,"safety":1到5或null}]},"tasks":[四个任务条件]}。
-            第一个 task 用于示范，后三个依次是 r1、r2、r3。task 格式 {"objective":"DISTANCE|TIME|COST|SAFETY|WEIGHTED","constraints":{"maxDistance":数或null,"maxTime":数或null,"maxCost":数或null,"minSafety":数或null,"requiredMetrics":["distance"],"requireCompleteInformation":false},"weights":{"distance":数,"time":数,"cost":数,"safety":数}}。
-            图含 4-7 个节点、至少 5 条无向边、至少两条起终点简单路径。数字符合 ageBand。除 levelNo=11 外所有边指标完整；levelNo=11 必须让至少一条候选路线缺少任务所需指标并把 requireCompleteInformation 设为 true。
+            第一个 task 用于示范，后三个依次是 r1、r2、r3。r1 用于读取起点、终点、边上数字和条件；r2 比较候选路线并检查数字、单位、硬约束或缺失指标；r3 必须与 r2 相比只改变一个数字或条件。task 格式 {"objective":"DISTANCE|TIME|COST|SAFETY|WEIGHTED","constraints":{"maxDistance":数或null,"maxTime":数或null,"maxCost":数或null,"minSafety":数或null,"requiredMetrics":["distance"],"requireCompleteInformation":false},"weights":{"distance":数,"time":数,"cost":数,"safety":数}}。
+            图含 4-7 个节点、至少 5 条无向边、至少两条起终点简单路径。数字符合 ageBand，不能有负数。如果故意缺少任务所需指标，对应 task 必须把 requireCompleteInformation 设为 true。
             不要返回题面、提示、讲评、解答或 Markdown。不要使用学校、家庭、道路、GPS、真实地名。
             """;
 
@@ -71,9 +71,10 @@ final class RouteGenerator implements SinglePlayerGameGenerator {
         context.put("locale", "zh-CN");
         JsonNode generated = client.generateJson(SYSTEM_PROMPT, context);
         validateSafety(generated.path("safety"));
-        Graph graph = graph(generated.path("graph"), request.levelNo());
+        Graph graph = graph(generated.path("graph"));
         List<Task> tasks = tasks(generated.path("tasks"));
         if (tasks.size() != 4) throw invalid();
+        if (taskDifferenceCount(tasks.get(2), tasks.get(3)) != 1) throw invalid();
         ObjectNode playable = buildPlayable(generated.path("themeLabel").asText("抽象图"), graph, tasks);
         return validator.splitAndValidate(gameCode(), playable, client.modelName() + "+RouteSolver-v1");
     }
@@ -122,6 +123,12 @@ final class RouteGenerator implements SinglePlayerGameGenerator {
         }
         SolveResult finalResult = solver.solve(graph, tasks.get(3));
         ObjectNode result = root.putObject("result");
+        result.put("evidence", "程序根据抽象图上的数字和硬条件逐条核对候选路线。");
+        result.put("aiCorrect", explanation(finalResult, tasks.get(3), labels));
+        result.put("uncertain", finalResult.informationMissing()
+                ? "任务需要的数字不完整，不能靠猜测补齐。"
+                : "AI 可以生成任务和解释，数学真值仍要由程序核对。");
+        result.put("change", discovery(finalResult, tasks.get(3), labels));
         result.put("discovery", discovery(finalResult, tasks.get(3), labels));
         result.put("limitation", finalResult.informationMissing()
                 ? "这张图缺少一项实际数字，程序不会替它猜测。"
@@ -129,7 +136,7 @@ final class RouteGenerator implements SinglePlayerGameGenerator {
         return root;
     }
 
-    private Graph graph(JsonNode node, int levelNo) {
+    private Graph graph(JsonNode node) {
         if (!node.isObject() || !node.path("nodes").isArray() || !node.path("edges").isArray()) throw invalid();
         List<Node> nodes = new ArrayList<>();
         for (JsonNode item : node.path("nodes")) {
@@ -150,9 +157,6 @@ final class RouteGenerator implements SinglePlayerGameGenerator {
             ));
         }
         if (nodes.size() < 4 || nodes.size() > 7 || edges.size() < 5 || edges.size() > 14) throw invalid();
-        if (levelNo != 11 && edges.stream().anyMatch(edge -> edge.distance() == null || edge.time() == null || edge.cost() == null || edge.safety() == null)) {
-            throw invalid();
-        }
         Graph graph = new Graph(nodes, edges, node.path("startId").asText(""), node.path("endId").asText(""));
         try {
             solver.validateGraph(graph);
@@ -184,6 +188,25 @@ final class RouteGenerator implements SinglePlayerGameGenerator {
             tasks.add(new Task(objective, parsedConstraints, parsedWeights));
         }
         return tasks;
+    }
+
+    private static int taskDifferenceCount(Task before, Task after) {
+        int differences = before.objective().equals(after.objective()) ? 0 : 1;
+        Constraints beforeConstraints = before.constraints();
+        Constraints afterConstraints = after.constraints();
+        if (!java.util.Objects.equals(beforeConstraints.maxDistance(), afterConstraints.maxDistance())) differences += 1;
+        if (!java.util.Objects.equals(beforeConstraints.maxTime(), afterConstraints.maxTime())) differences += 1;
+        if (!java.util.Objects.equals(beforeConstraints.maxCost(), afterConstraints.maxCost())) differences += 1;
+        if (!java.util.Objects.equals(beforeConstraints.minSafety(), afterConstraints.minSafety())) differences += 1;
+        if (!beforeConstraints.requiredMetrics().equals(afterConstraints.requiredMetrics())) differences += 1;
+        if (beforeConstraints.requireCompleteInformation() != afterConstraints.requireCompleteInformation()) differences += 1;
+        Weights beforeWeights = before.weights();
+        Weights afterWeights = after.weights();
+        if (Double.compare(beforeWeights.distance(), afterWeights.distance()) != 0) differences += 1;
+        if (Double.compare(beforeWeights.time(), afterWeights.time()) != 0) differences += 1;
+        if (Double.compare(beforeWeights.cost(), afterWeights.cost()) != 0) differences += 1;
+        if (Double.compare(beforeWeights.safety(), afterWeights.safety()) != 0) differences += 1;
+        return differences;
     }
 
     private ObjectNode mapNode(Graph graph) {

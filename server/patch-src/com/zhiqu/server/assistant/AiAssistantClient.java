@@ -107,11 +107,7 @@ final class AiAssistantClient {
                     return parseResponse(response.body());
                 }
                 boolean retryable = response.statusCode() == 429 || response.statusCode() >= 500;
-                lastFailure = new ApiException(
-                        retryable ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY,
-                        "AI_PROVIDER_ERROR",
-                        retryable ? "AI 服务暂时繁忙，请稍后重试" : "AI 服务返回了无效响应"
-                );
+                lastFailure = providerFailure(response.statusCode(), response.body());
                 if (!retryable) break;
             } catch (CancellationException error) {
                 generation.throwIfCancelled();
@@ -201,6 +197,38 @@ final class AiAssistantClient {
 
     private ApiException invalidResponse() {
         return new ApiException(HttpStatus.BAD_GATEWAY, "AI_RESPONSE_INVALID", "AI 返回内容未通过结构校验，请重试");
+    }
+
+    private ApiException providerFailure(int statusCode, String responseBody) {
+        if (statusCode == 401) {
+            return new ApiException(
+                    HttpStatus.BAD_GATEWAY,
+                    "AI_PROVIDER_UNAUTHORIZED",
+                    "AI API 密钥无效或已过期，请检查 DASHSCOPE_API_KEY"
+            );
+        }
+        if (statusCode == 403) {
+            return new ApiException(
+                    HttpStatus.BAD_GATEWAY,
+                    "AI_MODEL_ACCESS_DENIED",
+                    "当前 AI 模型未获授权，请在百炼控制台为该密钥开通模型权限，或修改 DASHSCOPE_MODEL"
+            );
+        }
+        if (statusCode == 404) {
+            return new ApiException(
+                    HttpStatus.BAD_GATEWAY,
+                    "AI_PROVIDER_NOT_FOUND",
+                    "AI 接口或模型不存在，请检查 DASHSCOPE_BASE_URL 和 DASHSCOPE_MODEL"
+            );
+        }
+        if (statusCode == 429 || statusCode >= 500) {
+            return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AI_PROVIDER_ERROR", "AI 服务暂时繁忙，请稍后重试");
+        }
+        return new ApiException(
+                HttpStatus.BAD_GATEWAY,
+                "AI_PROVIDER_ERROR",
+                "AI 请求被模型服务拒绝，请检查 DASHSCOPE_BASE_URL 和 DASHSCOPE_MODEL"
+        );
     }
 
     private String bounded(String value, int maxLength) {

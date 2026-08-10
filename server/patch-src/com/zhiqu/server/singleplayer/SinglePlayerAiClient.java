@@ -10,6 +10,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
@@ -102,8 +106,10 @@ final class SinglePlayerAiClient {
         payload.put("model", config.imageModel());
         payload.put("prompt", prompt);
         payload.put("n", 1);
-        payload.put("size", "1024x1024");
-        String response = sendJson(imageEndpoint(config.imageBaseUrl()), config.imageApiKey(), payload.toString());
+        payload.put("size", "512x512");
+        payload.put("quality", "low");
+        Duration imageTimeout = Duration.ofSeconds(Math.min(12, config.timeout().toSeconds()));
+        String response = sendJson(imageEndpoint(config.imageBaseUrl()), config.imageApiKey(), payload.toString(), 1, imageTimeout);
         try {
             JsonNode root = objectMapper.readTree(response);
             JsonNode item = root.path("data").path(0);
@@ -143,6 +149,9 @@ final class SinglePlayerAiClient {
         payload.put("model", config.visionModel());
         payload.put("temperature", 0.1);
         payload.put("max_tokens", 1600);
+        if ("MiniMax-M3".equalsIgnoreCase(config.visionModel())) {
+            payload.putObject("thinking").put("type", "disabled");
+        }
         ArrayNode messages = payload.putArray("messages");
         messages.addObject().put("role", "system").put("content", """
                 你是儿童图片观察游戏的视觉核验器。只描述实际图像，不发明元素，不识别真实身份。
@@ -185,7 +194,7 @@ final class SinglePlayerAiClient {
                     ? result.path("safety").asText("")
                     : result.path("safety").path("status").asText("");
             if ("REJECTED".equalsIgnoreCase(safety) || "BLOCKED".equalsIgnoreCase(safety)) {
-                throw new GenerationFailure("AI_CONTENT_REJECTED", "本次内容未通过儿童安全审核", "REJECTED", false);
+                throw new GenerationFailure("AI_CONTENT_REJECTED", "本次内容未通过儿童安全审核", "REJECTED", true);
             }
             return result;
         } catch (GenerationFailure error) {
@@ -196,16 +205,35 @@ final class SinglePlayerAiClient {
     }
 
     private String sendJson(URI endpoint, String apiKey, String body) {
+        return sendJson(endpoint, apiKey, body, 2, config.timeout());
+    }
+
+    private String sendJson(URI endpoint, String apiKey, String body, int maxAttempts, Duration timeout) {
         GenerationFailure last = null;
-        for (int attempt = 0; attempt < 2; attempt += 1) {
+        for (int attempt = 0; attempt < maxAttempts; attempt += 1) {
             try {
                 HttpRequest request = HttpRequest.newBuilder(endpoint)
-                        .timeout(config.timeout())
+                        .timeout(timeout)
                         .header("Authorization", "Bearer " + apiKey)
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                         .build();
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                CompletableFuture<HttpResponse<String>> responseFuture =
+                        httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                HttpResponse<String> response;
+                try {
+                    response = responseFuture.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+                } catch (TimeoutException error) {
+                    responseFuture.cancel(true);
+                    last = new GenerationFailure("AI_TIMEOUT", "AI 生成超时", "FAILED", true);
+                    continue;
+                } catch (ExecutionException error) {
+                    Throwable cause = error.getCause();
+                    last = cause instanceof java.net.http.HttpTimeoutException
+                            ? new GenerationFailure("AI_TIMEOUT", "AI 生成超时", "FAILED", true)
+                            : new GenerationFailure("AI_UNAVAILABLE", "当前无法连接 AI 服务", "FAILED", true);
+                    continue;
+                }
                 if (response.statusCode() >= 200 && response.statusCode() < 300) return response.body();
                 boolean retryable = response.statusCode() == 429 || response.statusCode() >= 500;
                 last = new GenerationFailure(
@@ -215,12 +243,10 @@ final class SinglePlayerAiClient {
                         retryable
                 );
                 if (!retryable) break;
-            } catch (java.net.http.HttpTimeoutException error) {
-                last = new GenerationFailure("AI_TIMEOUT", "AI 生成超时", "FAILED", true);
             } catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
                 throw new GenerationFailure("AI_REQUEST_INTERRUPTED", "AI 生成已停止", "FAILED", true);
-            } catch (IOException | IllegalArgumentException error) {
+            } catch (IllegalArgumentException error) {
                 last = new GenerationFailure("AI_UNAVAILABLE", "当前无法连接 AI 服务", "FAILED", true);
             }
         }

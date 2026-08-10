@@ -8,16 +8,18 @@ Migration: V43
 
 `原始信息 -> AI 提取 -> 自己观察 -> 改变一个信息 -> 比较判断 -> 发现 AI 还不知道什么`
 
-每款 12 关的学习目标可以固定，具体人物、场景、选项、图片、乐段、地图、数字、提示、讲评和发现必须实时生成。生成失败不得使用固定题目替代。
+每款游戏只有一个统一入口，一局由一次示范、三轮挑战和一次结算组成。具体人物、场景、选项、图片、乐段、地图、数字、提示、讲评和发现必须实时生成。生成失败不得使用固定题目替代。
 
 ## 实现
 
 - `frontend/dist/single-player-game.html` 是独立入口，复杂逻辑位于 `frontend/dist/single-player/`。
-- `zhiqu-placeholder-games.js` 将原四张占位卡改为正式卡片，入口为 `/single-player-game?game={gameCode}&level={levelNo}`。
-- 页面复用 `zhiqu.auth.session.v1`，游客可浏览介绍和 48 个关卡目标；开局、进度和奖励要求登录。
+- `zhiqu-placeholder-games.js` 将原四张占位卡改为正式卡片，入口为 `/single-player-game?game={gameCode}`。
+- 页面复用 `zhiqu.auth.session.v1`，游客可浏览游戏介绍；开局、进度和奖励要求登录。
 - 公共状态机为 `INTRO -> GENERATING -> DEMO -> ROUND_ACTIVE -> EVALUATING -> FEEDBACK -> RESULT`，生成错误进入 `FAILED`。
+- 前端内部始终发送 `levelNo = 1`，不渲染关卡目录、锁定关卡或下一关。进度只显示每款游戏“未完成/已完成”。
 - 有效实例 ID 保存在本地，刷新后从服务端恢复；答案和评分规则从不保存在前端。
-- 图片带实时 alt；声音按本局结构化音符用 Web Audio 合成，并提供暂停、重复、音量、节奏条和文字替代；路线同时显示文字指标，颜色不是唯一判断依据。
+- 图片会生成原图和一张单变量变体，两张都由独立视觉模型重新识别并提供实时 alt。
+- 声音按本局结构化音符用 Web Audio 合成，并提供暂停、重复、音量、节奏条和文字替代；路线同时显示文字指标，颜色不是唯一判断依据。
 
 ## 后端边界
 
@@ -27,6 +29,7 @@ Migration: V43
 - 两线程、十二项队列的后台执行器负责耗时生成；实例先持久化为 `GENERATING`。
 - `answer_spec_json` 只在服务端读取。实例查询只序列化 `public_content_json`。
 - 原 `GameCode` 和四款多人游戏不变。单机奖励通过 `SinglePlayerRewardAdapter` 调用现有 `RewardAwarder`，不直接写 `xp_ledger`。
+- V43 的 `level_no` 保留 1-12 约束以兼容旧数据；V2.0 新实例只写入 `1`，进度接口按 `gameCode` 聚合。
 
 ## AI 配置
 
@@ -66,7 +69,7 @@ MEDIA_ROOT=./data/media
 2. 运行路线求解器单元测试和单机 API 测试。
 3. 连续两次运行 `node server/patch-src/apply-patches.cjs`，均从基线成功生成运行 JAR。
 4. 打开 `http://localhost:8082/community?section=games`，确认四张卡可点击。
-5. 在约 `390x844` 与 `1440x900` 验收目录、示范、三轮、立即重试、结算、返回大厅和刷新恢复。
+5. 在约 `390x844` 与 `1440x900` 验收单入口介绍、示范、三轮、立即重试、结算、再玩一次、返回大厅和刷新恢复。
 6. 未配置模型时确认明确 503 或持久化失败状态，且页面没有固定题目。
 
 ## 已知限制

@@ -7,7 +7,7 @@
 | `gameCode` | 名称 | 生成与真值 |
 | --- | --- | --- |
 | `prompt-writer` | 提示词小作家 | 文本模型生成题面；程序校验字段、含糊、冲突和单变量变化 |
-| `image-detective` | 图片侦探 | 文本模型生成 `sceneSpec`，图片模型出图，独立视觉模型重新识别 |
+| `image-detective` | 图片侦探 | 文本模型生成原图与单变量 `sceneSpec`，图片模型出两张图，独立视觉模型分别重新识别 |
 | `sound-conductor` | 声音小指挥 | 文本模型生成结构化乐段；前端 Web Audio 合成，程序计算 BPM、力度和节拍 |
 | `route-and-conditions` | 路线与条件 | 文本模型只生成抽象图和任务条件；`RouteSolver` 计算数学真值 |
 
@@ -29,7 +29,7 @@
 
 ### `GET /api/single-player-games`
 
-无需登录。返回四款游戏的介绍、学科、年龄段、预计时长以及每款 12 个固定学习目标。这里只返回玩法元数据，不返回具体题目。
+无需登录。返回四款游戏的单一入口元数据，不返回关卡目录或具体题目。
 
 ```json
 [
@@ -40,8 +40,8 @@
     "description": "...",
     "learningGoal": "...",
     "ageBands": ["6-8", "9-10", "11-12"],
-    "estimatedMinutes": 8,
-    "levels": [{"levelNo": 1, "type": "DEMO", "learningGoal": "...", "difficulty": "BEGINNER", "estimatedMinutes": 8}]
+    "estimatedMinutes": 6,
+    "levelNo": 1
   }
 ]
 ```
@@ -50,10 +50,10 @@
 
 ### `GET /api/single-player-games/progress`
 
-返回当前用户已有进度。`ability` 只包含匿名能力指标和重试次数。
+固定返回四款游戏的完成状态。`ability` 只包含匿名能力指标和重试次数。旧版的多关卡进度按 `gameCode` 聚合，响应不再暴露 `levelNo`。
 
 ```json
-[{"gameCode":"prompt-writer","levelNo":1,"completed":true,"ability":{},"bestResult":{},"completedAt":"...","updatedAt":"..."}]
+[{"gameCode":"prompt-writer","completed":true,"ability":{},"bestResult":{},"completedAt":"...","updatedAt":"..."}]
 ```
 
 ## 创建与恢复
@@ -66,7 +66,8 @@
 
 - 资料有 `birth_date` 时服务端计算年龄段并忽略请求年龄段。
 - 资料不足时必须传 `6-8`、`9-10` 或 `11-12`。
-- 只向模型发送年龄段、关卡目标、随机种子和匿名能力范围；不发送生日、姓名、学校、地址或联系方式。
+- `levelNo` 只接受 `1`；保留该字段是为了兼容现有数据库。
+- 只向模型发送年龄段、本游戏学习目标和随机种子；不发送生日、姓名、学校、地址或联系方式。
 - 返回 `202` 和 `GENERATING`。同一用户重复使用相同 `requestId` 返回原实例。
 - 文本模型未配置时返回 `503 SINGLE_PLAYER_AI_NOT_CONFIGURED`。
 - 图片模型或视觉模型未配置时分别返回 `503 SINGLE_PLAYER_IMAGE_NOT_CONFIGURED`、`503 SINGLE_PLAYER_VISION_NOT_CONFIGURED`，不创建假图片实例。
@@ -77,11 +78,11 @@
 {
   "instanceId": "uuid",
   "gameCode": "sound-conductor",
-  "levelNo": 3,
+  "levelNo": 1,
   "ageBand": "9-10",
   "status": "READY",
   "currentRound": 0,
-  "contentVersion": "spg-v1",
+  "contentVersion": "spg-v2",
   "modelName": "...",
   "content": {"instruction":"...","demo":{},"rounds":[{}, {}, {}],"result":{}},
   "failureCode": null,
@@ -91,7 +92,7 @@
 }
 ```
 
-`content` 只含可渲染内容。数据库中的 `answer_spec_json`、正确选项、求解器最优路径集合和隐藏反馈不会出现在响应中。`GENERATING` 时前端约每秒轮询；普通 HTTP 请求不等待图片生成完成。
+`content` 只含可渲染内容。结果包含 `evidence`、`aiCorrect`、`uncertain`、`change`、`discovery` 和 `limitation`。图片第三轮包含已经分别核验的 `beforeImageUrl` 与 `afterImageUrl`。数据库中的 `answer_spec_json`、正确选项、求解器最优路径集合和隐藏反馈不会出现在响应中。`GENERATING` 时前端约每秒轮询；普通 HTTP 请求不等待图片生成完成。
 
 ## 提交
 
@@ -128,7 +129,7 @@
 
 ### `POST /api/single-player-games/instances/{instanceId}/regenerate`
 
-自由试玩台第 12 关可在 `READY` 时“换一个”；服务端清除本实例旧提交、换随机种子并返回 `202 GENERATING`。已完成实例应创建新实例。
+仅已完成实例可用于“再玩一次”。请求体为 `{"requestId":"uuid"}`；服务端使用同一 `gameCode`、`ageBand` 和新随机种子创建全新实例，返回 `202 GENERATING`。重复 `requestId` 返回同一新实例。
 
 ## 结算
 
@@ -138,7 +139,7 @@
 {"requestId":"uuid","discovery":"可选的儿童一句观察，不含私人信息"}
 ```
 
-只有 `currentRound = 3` 可以结算。服务端原子地标记实例、更新进度，并由 `SinglePlayerRewardAdapter` 调用现有 `RewardAwarder`。奖励来源键为 `SP:{gameCode}:L{levelNo}`；重复 `finish`、换 `requestId` 或并发请求都返回首个结算结果，不重复写奖励。
+只有 `currentRound = 3` 可以结算。服务端原子地标记实例、更新按 `gameCode` 展示的进度，并由 `SinglePlayerRewardAdapter` 调用现有 `RewardAwarder`。奖励来源键固定为 `SP:{gameCode}:L1`；重复 `finish`、换 `requestId` 或并发请求都返回首个结算结果，不重复写奖励。
 
 ## 游戏媒体
 
@@ -151,6 +152,7 @@
 | HTTP | `code` | 含义 |
 | --- | --- | --- |
 | 400 | `SINGLE_PLAYER_AGE_BAND_REQUIRED` | 资料无生日且没有选择年龄段 |
+| 400 | `SINGLE_PLAYER_LEVEL_INVALID` | `levelNo` 不是 `1` |
 | 400 | `SINGLE_PLAYER_PRIVATE_TEXT_REJECTED` | 结算文字含私人信息模式 |
 | 404 | `SINGLE_PLAYER_INSTANCE_NOT_FOUND` | 不存在或不属于当前用户 |
 | 409 | `SINGLE_PLAYER_ROUND_OUT_OF_ORDER` | 轮次顺序不正确 |

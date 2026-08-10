@@ -1,0 +1,102 @@
+erDiagram
+    "用户 users" {
+        string id PK "编号"
+        string username UK "用户名"
+        string nickname "昵称"
+        string status "状态"
+    }
+    "课程分类 categories" {
+        string id PK "编号"
+        string slug UK "唯一标识"
+        string name "名称"
+        int sort_order "排序"
+    }
+    "学习内容 contents" {
+        string id PK "编号"
+        string category_id FK "分类编号"
+        string type "内容类型"
+        string title "标题"
+        string status "状态"
+    }
+    "标签 tags" {
+        string id PK "编号"
+        string slug UK "唯一标识"
+        string name "名称"
+    }
+    "社区问题 community_questions" {
+        string id PK "编号"
+        string author_id FK "作者编号"
+        string published_revision_id FK "已发布修订编号"
+        string checking_revision_id FK "审核中修订编号"
+        string accepted_answer_id FK "采纳回答编号"
+        string question_status "问题状态"
+    }
+    "问题修订 community_question_revisions" {
+        string id PK "编号"
+        string question_id FK "字段：question_id"
+        string category_id FK "分类编号"
+        string linked_content_id FK "关联内容编号"
+        int revision_number "修订版本号"
+        string safety_status "安全状态"
+    }
+    "问题修订标签 community_question_revision_tags" {
+        string revision_id PK, FK "修订编号"
+        string tag_id PK, FK "字段：tag_id"
+        int sort_order "排序"
+    }
+    "社区回答 community_answers" {
+        string id PK "编号"
+        string question_id FK "字段：question_id"
+        string author_id FK "作者编号"
+        string published_revision_id FK "已发布修订编号"
+        string checking_revision_id FK "审核中修订编号"
+        string lifecycle_status "生命周期状态"
+    }
+    "回答修订 community_answer_revisions" {
+        string id PK "编号"
+        string answer_id FK "回答编号"
+        string linked_content_id FK "关联内容编号"
+        int revision_number "修订版本号"
+        string safety_status "安全状态"
+    }
+    "社区收藏 community_bookmarks" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string question_id FK "字段：question_id"
+    }
+    "社区隐藏内容 community_hidden_contents" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string target_type "目标类型"
+        string target_id "目标编号"
+    }
+    "内容安全检查 content_safety_checks" {
+        string id PK "编号"
+        string target_type "目标类型"
+        string target_id "目标编号"
+        string decision "判定结果"
+    }
+    "社区动作请求 community_action_requests" {
+        string request_id PK "请求编号"
+        string user_id FK "用户编号"
+        string action_type "动作类型"
+        string target_id "目标编号"
+    }
+
+    "课程分类 categories" ||--o{ "学习内容 contents" : "分类"
+    "用户 users" ||--o{ "社区问题 community_questions" : "提问"
+    "社区问题 community_questions" ||--o{ "问题修订 community_question_revisions" : "修订"
+    "课程分类 categories" ||--o{ "问题修订 community_question_revisions" : "分类"
+    "学习内容 contents" ||--o{ "问题修订 community_question_revisions" : "引用"
+    "问题修订 community_question_revisions" ||--o{ "问题修订标签 community_question_revision_tags" : "已标记"
+    "标签 tags" ||--o{ "问题修订标签 community_question_revision_tags" : "标记"
+    "社区问题 community_questions" ||--o{ "社区回答 community_answers" : "接收"
+    "用户 users" ||--o{ "社区回答 community_answers" : "回答"
+    "社区回答 community_answers" ||--o{ "回答修订 community_answer_revisions" : "修订"
+    "学习内容 contents" ||--o{ "回答修订 community_answer_revisions" : "引用"
+    "用户 users" ||--o{ "社区收藏 community_bookmarks" : "收藏"
+    "社区问题 community_questions" ||--o{ "社区收藏 community_bookmarks" : "被收藏"
+    "用户 users" ||--o{ "社区隐藏内容 community_hidden_contents" : "隐藏"
+    "用户 users" ||--o{ "社区动作请求 community_action_requests" : "提交"
+    "内容安全检查 content_safety_checks" ||--o{ "社区问题 community_questions" : "目标关联（逻辑）"
+    "内容安全检查 content_safety_checks" ||--o{ "社区回答 community_answers" : "目标关联（逻辑）"
