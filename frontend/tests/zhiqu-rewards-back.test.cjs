@@ -17,8 +17,9 @@ assert.match(script, /history\.back\(\)/, 'the button must return to the previou
 assert.match(script, /\/magic\?mode=create/, 'direct visits must have a safe lobby fallback');
 assert.match(server, /zhiqu-rewards-back\.js/, 'the static server must inject the rewards back button');
 
-function renderRewardsHeader(historyLength) {
+function renderRewardsHeader(historyLength, nativeBackInitially = false) {
   const elementsById = new Map();
+  let observerCallback = null;
 
   class Element {
     constructor(tagName, textContent = '') {
@@ -65,10 +66,13 @@ function renderRewardsHeader(historyLength) {
   const leftSlot = new Element('div');
   const titleSlot = new Element('div');
   const heading = new Element('h1', '个人成长');
+  const nativeBack = new Element('a');
+  nativeBack.setAttribute('aria-label', '(tabs), back');
   const headerRow = new Element('div');
   titleSlot.appendChild(heading);
   headerRow.appendChild(leftSlot);
   headerRow.appendChild(titleSlot);
+  if (nativeBackInitially) leftSlot.appendChild(nativeBack);
 
   const document = {
     readyState: 'complete',
@@ -76,7 +80,8 @@ function renderRewardsHeader(historyLength) {
     head: new Element('head'),
     createElement: (tagName) => new Element(tagName),
     getElementById: (id) => elementsById.get(id) || null,
-    querySelectorAll: () => [heading],
+    querySelector: (selector) => selector.includes('aria-label') && nativeBack.parentElement ? nativeBack : null,
+    querySelectorAll: (selector) => selector.startsWith('h1') ? [heading] : [],
   };
   const navigation = { backCalls: 0, assignedPath: null };
   const context = {
@@ -90,6 +95,7 @@ function renderRewardsHeader(historyLength) {
       assign: (pathName) => { navigation.assignedPath = pathName; },
     },
     MutationObserver: class {
+      constructor(callback) { observerCallback = callback; }
       observe() {}
     },
     requestAnimationFrame: (callback) => callback(),
@@ -97,17 +103,33 @@ function renderRewardsHeader(historyLength) {
   };
   vm.runInNewContext(script, context, { filename: 'zhiqu-rewards-back.js' });
 
-  return { button: document.getElementById('zq-rewards-back'), leftSlot, navigation };
+  return {
+    button: () => document.getElementById('zq-rewards-back'),
+    addNativeBack() {
+      leftSlot.appendChild(nativeBack);
+      observerCallback?.();
+    },
+    leftSlot,
+    navigation,
+  };
 }
 
 const withHistory = renderRewardsHeader(2);
-assert.equal(withHistory.button?.parentElement, withHistory.leftSlot, 'button must render in the header left slot');
-assert.equal(withHistory.button?.attributes.get('aria-label'), '返回');
-withHistory.button.click();
+assert.equal(withHistory.button()?.parentElement, withHistory.leftSlot, 'button must render in the header left slot');
+assert.equal(withHistory.button()?.attributes.get('aria-label'), '返回');
+withHistory.button().click();
 assert.equal(withHistory.navigation.backCalls, 1, 'button must go back when page history is available');
 
 const directVisit = renderRewardsHeader(1);
-directVisit.button.click();
+directVisit.button().click();
 assert.equal(directVisit.navigation.assignedPath, '/magic?mode=create', 'direct visits must return to the lobby');
+
+const withNativeBack = renderRewardsHeader(2, true);
+assert.equal(withNativeBack.button(), null, 'the fallback must not be injected when Expo already rendered a back link');
+
+const lateNativeBack = renderRewardsHeader(2);
+assert.ok(lateNativeBack.button(), 'the fallback may render before Expo hydration completes');
+lateNativeBack.addNativeBack();
+assert.equal(lateNativeBack.button(), null, 'a native back link rendered later must remove the injected fallback');
 
 console.log('rewards back button: ok');

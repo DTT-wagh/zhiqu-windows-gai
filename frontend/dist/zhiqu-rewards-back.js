@@ -60,6 +60,12 @@
     );
   }
 
+  function hasNativeBackControl() {
+    return document.querySelector(
+      'a[aria-label="back"], a[aria-label$=", back"], [role="link"][aria-label="back"], [role="link"][aria-label$=", back"]'
+    ) !== null;
+  }
+
   function syncBackButton() {
     const existing = document.getElementById(BUTTON_ID);
     if (globalThis.location.pathname !== REWARDS_PATH) {
@@ -71,6 +77,11 @@
     const headerRow = heading?.parentElement?.parentElement;
     const leftSlot = headerRow?.firstElementChild;
     if (!heading || !headerRow || !leftSlot) return;
+
+    if (hasNativeBackControl()) {
+      existing?.remove();
+      return;
+    }
 
     if (existing && existing.parentElement === leftSlot) return;
     existing?.remove();
