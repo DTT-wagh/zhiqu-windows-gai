@@ -6,7 +6,9 @@
 
 无损图片版：[erd-zh.svg](./erd-zh.svg)
 
-推荐阅读：[按业务模块拆分的 6 张图](./erd-zh-split.md)
+推荐阅读：[核心表与重要表（4 张精简图）](./erd-core.md)
+
+完整拆分版：[按业务模块拆分的 6 张图](./erd-zh-split.md)
 
 ```mermaid
 erDiagram

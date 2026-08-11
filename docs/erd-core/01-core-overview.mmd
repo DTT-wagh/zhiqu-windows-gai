@@ -1,0 +1,95 @@
+erDiagram
+    "用户 users" {
+        string id PK "编号"
+        string username UK "用户名"
+        string nickname "昵称"
+        string status "状态"
+    }
+    "课程分类 categories" {
+        string id PK "编号"
+        string slug UK "唯一标识"
+        string name "名称"
+        int sort_order "排序"
+    }
+    "学习内容 contents" {
+        string id PK "编号"
+        string category_id FK "分类编号"
+        string type "内容类型"
+        string title "标题"
+        string status "状态"
+    }
+    "标签 tags" {
+        string id PK "编号"
+        string slug UK "唯一标识"
+        string name "名称"
+    }
+    "内容标签关联 content_tags" {
+        string content_id PK, FK "内容编号"
+        string tag_id PK, FK "字段：tag_id"
+        int sort_order "排序"
+    }
+    "观看记录 viewing_history" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string content_id FK "内容编号"
+        int progress_seconds "字段：progress_seconds"
+        boolean completed "是否完成"
+    }
+    "社区问题 community_questions" {
+        string id PK "编号"
+        string author_id FK "作者编号"
+        string published_revision_id FK "已发布修订编号"
+        string checking_revision_id FK "审核中修订编号"
+        string accepted_answer_id FK "采纳回答编号"
+        string question_status "问题状态"
+    }
+    "社区回答 community_answers" {
+        string id PK "编号"
+        string question_id FK "字段：question_id"
+        string author_id FK "作者编号"
+        string published_revision_id FK "已发布修订编号"
+        string checking_revision_id FK "审核中修订编号"
+        string lifecycle_status "生命周期状态"
+    }
+    "好友关系 friendships" {
+        string id PK "编号"
+        string user_low_id FK "低位用户编号"
+        string user_high_id FK "高位用户编号"
+        string latest_request_id FK "最新请求编号"
+        string removed_by_user_id FK "移除者编号"
+        string status "状态"
+    }
+    "私聊会话 chat_conversations" {
+        string id PK "编号"
+        string user_low_id FK "低位用户编号"
+        string user_high_id FK "高位用户编号"
+    }
+    "AI助手会话 assistant_conversations" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string title "标题"
+        boolean memory_enabled "是否启用记忆"
+    }
+    "单机游戏实例 single_player_game_instances" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string game_code "游戏代码"
+        int level_no "关卡序号"
+        string status "状态"
+    }
+
+    "用户 users" ||--o{ "观看记录 viewing_history" : "观看"
+    "学习内容 contents" ||--o{ "观看记录 viewing_history" : "记录"
+    "课程分类 categories" ||--o{ "学习内容 contents" : "分类"
+    "标签 tags" ||--o{ "内容标签关联 content_tags" : "标记"
+    "学习内容 contents" ||--o{ "内容标签关联 content_tags" : "已标记"
+    "用户 users" ||--o{ "好友关系 friendships" : "低位用户"
+    "用户 users" ||--o{ "好友关系 friendships" : "高位用户"
+    "用户 users" ||--o{ "好友关系 friendships" : "移除"
+    "用户 users" ||--o{ "社区问题 community_questions" : "提问"
+    "社区问题 community_questions" ||--o{ "社区回答 community_answers" : "接收"
+    "用户 users" ||--o{ "社区回答 community_answers" : "回答"
+    "用户 users" ||--o{ "私聊会话 chat_conversations" : "低位用户"
+    "用户 users" ||--o{ "私聊会话 chat_conversations" : "高位用户"
+    "用户 users" ||--o{ "AI助手会话 assistant_conversations" : "拥有"
+    "用户 users" ||--o{ "单机游戏实例 single_player_game_instances" : "开始"

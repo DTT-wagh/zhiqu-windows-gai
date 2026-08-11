@@ -1,0 +1,129 @@
+erDiagram
+    "用户 users" {
+        string id PK "编号"
+        string username UK "用户名"
+        string nickname "昵称"
+        string status "状态"
+    }
+    "学习内容 contents" {
+        string id PK "编号"
+        string category_id FK "分类编号"
+        string type "内容类型"
+        string title "标题"
+        string status "状态"
+    }
+    "AI助手会话 assistant_conversations" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string title "标题"
+        boolean memory_enabled "是否启用记忆"
+    }
+    "AI助手消息 assistant_messages" {
+        string id PK "编号"
+        string conversation_id FK "会话编号"
+        string author_user_id FK "作者用户编号"
+        string reply_to_message_id FK "回复消息编号"
+        string role "角色"
+        string safety_status "安全状态"
+    }
+    "AI助手记忆 assistant_memory" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string memory_key "记忆键"
+        boolean enabled "是否启用"
+    }
+    "AI助手推荐反馈 assistant_recommendation_events" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string conversation_id FK "会话编号"
+        string message_id FK "消息编号"
+        string content_id FK "内容编号"
+        string event_type "事件类型"
+    }
+    "单机游戏实例 single_player_game_instances" {
+        string id PK "编号"
+        string user_id FK "用户编号"
+        string game_code "游戏代码"
+        int level_no "关卡序号"
+        string status "状态"
+    }
+    "单机游戏提交 single_player_game_submissions" {
+        string id PK "编号"
+        string instance_id FK "实例编号"
+        string round_id "回合编号"
+        string request_id UK "请求编号"
+    }
+    "单机游戏进度 single_player_game_progress" {
+        string user_id PK, FK "用户编号"
+        string game_code PK "游戏代码"
+        int level_no PK "关卡序号"
+        boolean completed "是否完成"
+    }
+    "游戏内容关联 game_content_links" {
+        string id PK "编号"
+        string game_code "游戏代码"
+        string content_id FK "内容编号"
+        int sort_order "排序"
+    }
+    "魔法游戏房间 magic_game_rooms" {
+        string id PK "编号"
+        string mentor_user_id FK "导师用户编号"
+        string novice_user_id FK "新手用户编号"
+        string next_room_id "下一房间编号"
+        string status "状态"
+    }
+    "盲盒房间 blind_box_rooms" {
+        string id PK "编号"
+        string boss_user_id FK "老板用户编号"
+        string designer_user_id FK "设计师用户编号"
+        string task_id FK "任务编号"
+        string next_room_id "下一房间编号"
+        string status "状态"
+    }
+    "谁是卧底房间 truth_game_rooms" {
+        string id PK "编号"
+        string undercover_user_id FK "卧底用户编号"
+        string detective_user_id FK "侦探用户编号"
+        string evidence_message_id "证据消息编号"
+        string next_room_id "下一房间编号"
+        string status "状态"
+    }
+    "越狱游戏房间 jailbreak_game_rooms" {
+        string id PK "编号"
+        string host_user_id FK "房主编号"
+        string resolving_attempt_id "结算尝试编号"
+        string status "状态"
+    }
+    "游戏交互安全检查 game_interaction_safety_checks" {
+        string id PK "编号"
+        string game_code "游戏代码"
+        string room_id "房间编号"
+        string sender_user_id FK "发送者用户编号"
+        string status "状态"
+    }
+
+    "学习内容 contents" ||--o{ "游戏内容关联 game_content_links" : "关联"
+    "用户 users" ||--o{ "魔法游戏房间 magic_game_rooms" : "参与魔法游戏"
+    "用户 users" ||--o{ "盲盒房间 blind_box_rooms" : "参与盲盒游戏"
+    "用户 users" ||--o{ "谁是卧底房间 truth_game_rooms" : "参与卧底游戏"
+    "用户 users" ||--o{ "越狱游戏房间 jailbreak_game_rooms" : "主持"
+    "用户 users" ||--o{ "游戏交互安全检查 game_interaction_safety_checks" : "发送"
+    "用户 users" ||--o{ "AI助手会话 assistant_conversations" : "拥有"
+    "AI助手会话 assistant_conversations" ||--o{ "AI助手消息 assistant_messages" : "包含"
+    "用户 users" ||--o{ "AI助手消息 assistant_messages" : "撰写"
+    "AI助手消息 assistant_messages" ||--o| "AI助手消息 assistant_messages" : "回复"
+    "用户 users" ||--o{ "AI助手记忆 assistant_memory" : "存储"
+    "用户 users" ||--o{ "AI助手推荐反馈 assistant_recommendation_events" : "产生"
+    "AI助手会话 assistant_conversations" ||--o{ "AI助手推荐反馈 assistant_recommendation_events" : "关联会话"
+    "AI助手消息 assistant_messages" ||--o{ "AI助手推荐反馈 assistant_recommendation_events" : "触发"
+    "学习内容 contents" ||--o{ "AI助手推荐反馈 assistant_recommendation_events" : "推荐"
+    "用户 users" ||--o{ "单机游戏实例 single_player_game_instances" : "开始"
+    "单机游戏实例 single_player_game_instances" ||--o{ "单机游戏提交 single_player_game_submissions" : "接收"
+    "用户 users" ||--o{ "单机游戏进度 single_player_game_progress" : "记录"
+    "魔法游戏房间 magic_game_rooms" ||--o{ "魔法游戏房间 magic_game_rooms" : "下一房间（逻辑）"
+    "盲盒房间 blind_box_rooms" ||--o{ "盲盒房间 blind_box_rooms" : "下一房间（逻辑）"
+    "谁是卧底房间 truth_game_rooms" ||--o{ "谁是卧底房间 truth_game_rooms" : "下一房间（逻辑）"
+    "游戏交互安全检查 game_interaction_safety_checks" ||--o{ "魔法游戏房间 magic_game_rooms" : "房间关联（逻辑）"
+    "游戏交互安全检查 game_interaction_safety_checks" ||--o{ "盲盒房间 blind_box_rooms" : "房间关联（逻辑）"
+    "游戏交互安全检查 game_interaction_safety_checks" ||--o{ "谁是卧底房间 truth_game_rooms" : "房间关联（逻辑）"
+    "游戏交互安全检查 game_interaction_safety_checks" ||--o{ "越狱游戏房间 jailbreak_game_rooms" : "房间关联（逻辑）"

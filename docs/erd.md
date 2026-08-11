@@ -6,7 +6,7 @@
 
 无损图片版：[erd.svg](./erd.svg)
 
-中文阅读版：[erd-zh.md](./erd-zh.md) · [中文拆分版（6 张图）](./erd-zh-split.md) · [中文无损图片](./erd-zh.svg)
+中文阅读版：[erd-zh.md](./erd-zh.md) · [核心精简版（4 张图）](./erd-core.md) · [完整拆分版（6 张图）](./erd-zh-split.md) · [中文无损图片](./erd-zh.svg)
 
 ```mermaid
 erDiagram
