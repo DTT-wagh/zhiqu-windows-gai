@@ -34,12 +34,19 @@ assert.match(script, /window\.history\.back\(\)/, 'assistant-to-underlying-tab n
 assert.match(script, /function detachAssistantOverlay/, 'assistant overlay should be removed before a native tab transition');
 assert.match(script, /state\.leavingAssistant && isAssistantRoute\(\)/, 'route synchronization should not remount the assistant during its native transition');
 assert.match(script, /translateY\(-8px\)/, 'active assistant icon must rise 8px');
-assert.match(script, /\.zq-ai-page\{[^}]*animation:none\}/, 'assistant page should not animate when entered from another page');
-assert.match(script, /@keyframes zqAiPageEnter/, 'assistant page enter keyframes must exist');
+assert.match(script, /\.zq-ai-page\{[^}]*animation:none\}/, 'direct assistant page loads should remain still');
+assert.match(script, /state\.enteringAssistant = true;[\s\S]*playAssistantSourceExit\(\)/, 'all primary routes must start the assistant transition');
+assert.match(script, /\.zq-ai-page\[data-entering="true"\]\{background:transparent;isolation:isolate\}/, 'assistant entry must provide a staged background bridge');
+assert.match(script, /\.zq-ai-page\[data-entering="true"\]::before[^}]*animation:zqAiAssistantBackdrop 260ms/, 'assistant background must cover the source before content appears');
+assert.match(script, /\.zq-ai-page\[data-entering="true"\] \.zq-ai-shell[^}]*animation:zqAiAssistantReveal 320ms 120ms/, 'assistant content must enter after the background bridge starts');
+assert.match(script, /#root\.zq-ai-assistant-source-exit[^}]*animation:zqAiAssistantSourceExit 260ms/, 'the source page must softly recede behind the assistant');
+assert.match(script, /page\.setAttribute\('data-entering', 'true'\)/, 'the reveal must be attached only to the newly built assistant page');
+assert.match(script, /@keyframes zqAiAssistantSourceExit\{from\{opacity:1;transform:scale\(1\)\}to\{opacity:\.12;transform:scale\(\.99\)\}\}/, 'source page must fade and scale without flipping');
+assert.match(script, /@keyframes zqAiAssistantBackdrop\{from\{opacity:0\}to\{opacity:1\}\}/, 'background bridge must be an opacity transition');
+assert.match(script, /@keyframes zqAiAssistantReveal\{from\{opacity:0;transform:scale\(1\.01\)\}to\{opacity:1;transform:scale\(1\)\}\}/, 'assistant content must fade into focus');
 assert.match(script, /function replayNativePageEnter/, 'returning to the native page underneath the assistant should replay the native scene transition');
 assert.match(script, /#root\.zq-ai-native-page-enter/, 'the native shell replay should use the same page transition');
-assert.match(script, /perspective\(1400px\) rotateY\(-96deg\) scale\(\.985\)/, 'assistant page should reuse the existing tabs enter rotation, scale and perspective');
-assert.doesNotMatch(script, /zqAiPageFade|zqAiPageFlip/, 'assistant page must not use a separate page transition');
+assert.doesNotMatch(script, /rotateY\(-96deg\)|zqAiPageEnter|zqAiNativeSceneExit/, 'assistant entry must not use a page-flip transition');
 assert.doesNotMatch(script, /translateX\(24px\)/, 'assistant page must not invent a separate slide transition');
 assert.match(script, /\.zq-ai-nav-item\[data-active="true"\] \.zq-ai-nav-icon\{width:44px;height:44px/, 'every active navigation icon must share the assistant scale effect');
 assert.match(script, /\.zq-ai-nav-item:not\(\[data-active="true"\]\):hover \.zq-ai-nav-icon/, 'every inactive navigation icon must share the hover lift effect');
@@ -82,6 +89,15 @@ assert.match(script, /function cancelActiveGeneration\(options\)/, 'generation c
 assert.match(script, /\/api\/assistant\/requests\/.*encodeURIComponent\(active\.requestId\)/, 'stop generation must call the authenticated backend cancellation endpoint');
 assert.match(script, /startGenerationRequest\(requestId, 'create-conversation'\)/, 'new-conversation greetings must register a cancellable request');
 assert.match(script, /body: \{ requestId: requestId, memoryEnabled: state\.memoryEnabled \}/, 'new conversations must send their cancellation request ID');
+assert.match(script, /settingsOpen: false/, 'memory settings must start closed');
+assert.match(script, /data-zq-open-settings/, 'assistant toolbar must expose a settings command');
+assert.match(script, /aria-haspopup', 'dialog'/, 'settings command must expose its dialog relationship');
+assert.match(script, /aria-controls', 'zq-ai-settings-menu'/, 'settings command must identify its menu');
+assert.match(script, /function setSettingsOpen\(open, options\)/, 'settings visibility must use one lifecycle helper');
+assert.match(script, /data-zq-settings-scrim|zq-ai-settings-scrim/, 'settings menu must provide an outside-click dismissal surface');
+assert.match(script, /data-zq-memory-setting/, 'long-term memory checkbox must live inside the settings menu');
+assert.match(script, /经\u8fc7\u9690\u79c1\u8fc7\u6ee4|\\u7ecf\\u8fc7\\u9690\\u79c1\\u8fc7\\u6ee4/, 'settings menu must explain privacy-filtered memory');
+assert.doesNotMatch(script, /\.zq-ai-memory/, 'toolbar must not render the standalone memory checkbox');
 assert.match(script, /stop\.disabled = state\.generationCancelPending/, 'stop generation must prevent duplicate cancellation clicks');
 assert.match(script, /var optimisticMessage = retryMessage \|\| \{/, 'sent text must enter the chat before generation starts');
 assert.match(script, /state\.messages\.push\(optimisticMessage\)/, 'sent text must render as an immediate user message');
@@ -188,4 +204,4 @@ assert.match(generationRegistry, /request\.cancel\(true\)/, 'server cancellation
 assert.match(assistantService, /generation\.throwIfCancelled\(\)[\s\S]*?insertAssistantMessage/, 'server must recheck cancellation before saving an assistant reply');
 assert.match(generationRegistry, /CANCEL_TTL_MILLIS = Duration\.ofMinutes\(1\)\.toMillis\(\)/, 'server must handle cancellation arriving before generation registration');
 
-console.log(JSON.stringify({ result: 'ok', checks: 135 }));
+console.log(JSON.stringify({ result: 'ok', checks: 144 }));

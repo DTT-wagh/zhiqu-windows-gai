@@ -44,6 +44,7 @@
     sidebarKeyHandler: null,
     sidebarTouchStart: null,
     sidebarBodyLock: null,
+    settingsOpen: false,
     copiedMessageId: null,
     copiedTimer: null,
     sourceExpandedIds: Object.create(null),
@@ -58,6 +59,7 @@
     portraitVisible: false,
     portraitMode: '',
     nativeRoute: null,
+    enteringAssistant: false,
     leavingAssistant: false,
     initialized: false
   };
@@ -248,6 +250,8 @@
       // tab can go back through browser history instead of asking the native
       // router to navigate to its already-active screen.
       state.nativeRoute = pathName();
+      state.enteringAssistant = true;
+      playAssistantSourceExit();
     }
     window.history.pushState({}, '', href);
     // `/ai-assistant` is an enhancement route, not an Expo route. Do not send
@@ -283,8 +287,12 @@
       '.zq-ai-nav-item[data-active="true"] .zq-ai-nav-icon{width:44px;height:44px;margin-bottom:-2px;transform:translateY(-8px);background:var(--zq-ai-nav-active);color:#fff;box-shadow:0 7px 14px rgba(54,92,141,.20)}',
       '@media (hover:hover){.zq-ai-nav-item:not([data-active="true"]):hover .zq-ai-nav-icon{transform:translateY(-2px)}}',
       '.zq-ai-page{position:fixed;z-index:9000;inset:0;overflow:hidden;background:var(--zq-ai-paper);color:var(--zq-ai-ink);font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;transform-origin:left center;backface-visibility:hidden;animation:none}',
+      '.zq-ai-page[data-entering="true"]{background:transparent;isolation:isolate}',
+      '.zq-ai-page[data-entering="true"]::before{content:"";position:absolute;z-index:0;inset:0;background:var(--zq-ai-paper);animation:zqAiAssistantBackdrop 260ms cubic-bezier(.22,.61,.36,1) both}',
+      '.zq-ai-page[data-entering="true"] .zq-ai-shell{position:relative;z-index:1;animation:zqAiAssistantReveal 320ms 120ms cubic-bezier(.22,.61,.36,1) both}',
       '.zq-ai-sidebar-scrim{display:none}.zq-ai-sidebar-scrim[hidden]{display:none!important}',
-      '#root.zq-ai-native-page-enter{transform-origin:left center;backface-visibility:hidden;animation:zqAiPageEnter 560ms cubic-bezier(.62,.02,.25,1) both}',
+      '#root.zq-ai-assistant-source-exit{transform-origin:center center;backface-visibility:hidden;animation:zqAiAssistantSourceExit 260ms cubic-bezier(.22,.61,.36,1) both}',
+      '#root.zq-ai-native-page-enter{transform-origin:left center;backface-visibility:hidden;animation:zqAiNativeSceneEnter 560ms cubic-bezier(.62,.02,.25,1) both}',
       '.zq-ai-shell{height:100%;box-sizing:border-box;padding-bottom:var(--zq-ai-nav-height);display:grid;grid-template-columns:260px minmax(0,1fr);overflow:hidden;transition:grid-template-columns 190ms ease-out}',
       '.zq-ai-shell[data-sidebar-collapsed="true"]{grid-template-columns:68px minmax(0,1fr)}',
       '.zq-ai-sidebar{min-width:0;border-right:1px solid var(--zq-ai-line);background:#eeeee6;padding:18px 14px;display:flex;flex-direction:column;gap:14px;overflow:hidden;transition:padding 190ms ease-out}',
@@ -333,10 +341,17 @@
       '.zq-ai-pin{position:absolute;z-index:3;left:73px;bottom:51px;width:24px;height:24px;display:grid;place-items:center;border-radius:50%;background:#d9ad4b;color:#fff;font-size:15px;border:3px solid #fffdfa}',
       '.zq-ai-dialogue{min-height:0;background:rgba(255,253,250,.88);backdrop-filter:blur(12px);display:grid;grid-template-rows:auto minmax(0,1fr) auto}',
       '.zq-ai-dialogue[data-conversation-switching="true"]{animation:zqAiConversationSwitch 320ms ease-out both}',
-      '.zq-ai-toolbar{min-height:52px;padding:7px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(216,210,197,.8)}',
+      '.zq-ai-toolbar{position:relative;z-index:8;min-height:52px;padding:7px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(216,210,197,.8)}',
       '.zq-ai-toolbar-title{min-width:0;flex:1;font-size:13px;font-weight:850;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.zq-ai-memory{display:flex;align-items:center;gap:7px;color:var(--zq-ai-soft);font-size:11px;white-space:nowrap}',
-      '.zq-ai-memory input{width:18px;height:18px;accent-color:var(--zq-ai-teal)}',
+      '.zq-ai-settings-button{flex:none}',
+      '.zq-ai-settings-scrim{position:fixed;z-index:30;inset:0;border:0;background:transparent;padding:0;cursor:default}',
+      '.zq-ai-settings-menu{position:absolute;z-index:31;right:12px;top:calc(100% + 6px);width:min(320px,calc(100vw - 24px));box-sizing:border-box;padding:14px;border:1px solid var(--zq-ai-line);border-radius:8px;background:#fffdfa;box-shadow:0 12px 28px rgba(36,49,57,.16)}',
+      '.zq-ai-settings-heading{margin:0 0 10px;font-size:13px;line-height:18px;font-weight:900;color:var(--zq-ai-ink)}',
+      '.zq-ai-settings-option{min-height:58px;display:grid;grid-template-columns:minmax(0,1fr) 22px;gap:12px;align-items:center;cursor:pointer}',
+      '.zq-ai-settings-copy{min-width:0;display:grid;gap:3px}',
+      '.zq-ai-settings-title{font-size:13px;line-height:18px;font-weight:850;color:var(--zq-ai-ink)}',
+      '.zq-ai-settings-description{font-size:11px;line-height:17px;color:var(--zq-ai-soft)}',
+      '.zq-ai-settings-option input{width:20px;height:20px;margin:0;accent-color:var(--zq-ai-teal);cursor:pointer}',
       '.zq-ai-mobile-menu{display:none}',
       '.zq-ai-messages{min-height:0;overflow:auto;padding:18px clamp(14px,4vw,46px) 22px;scroll-behavior:smooth}',
       '.zq-ai-message{display:flex;flex-direction:column;align-items:flex-start;margin:0 auto 16px;max-width:820px}',
@@ -397,15 +412,18 @@
       '.zq-ai-primary{min-height:48px;margin-top:18px;border:0;border-radius:8px;background:var(--zq-ai-teal);color:#fff;padding:0 20px;font-weight:850;cursor:pointer}',
       '.zq-ai-loading{display:flex;align-items:center;gap:6px;color:var(--zq-ai-soft);font-size:13px}',
       '.zq-ai-loading-dots{display:inline-flex;gap:3px}.zq-ai-loading-dots i{width:5px;height:5px;border-radius:50%;background:var(--zq-ai-teal);animation:zqAiPulse 900ms ease-in-out infinite}.zq-ai-loading-dots i:nth-child(2){animation-delay:120ms}.zq-ai-loading-dots i:nth-child(3){animation-delay:240ms}',
-      '@keyframes zqAiPageEnter{from{opacity:.04;transform:perspective(1400px) rotateY(-96deg) scale(.985)}to{opacity:1;transform:perspective(1400px) rotateY(0deg) scale(1)}}',
+      '@keyframes zqAiAssistantSourceExit{from{opacity:1;transform:scale(1)}to{opacity:.12;transform:scale(.99)}}',
+      '@keyframes zqAiAssistantBackdrop{from{opacity:0}to{opacity:1}}',
+      '@keyframes zqAiAssistantReveal{from{opacity:0;transform:scale(1.01)}to{opacity:1;transform:scale(1)}}',
+      '@keyframes zqAiNativeSceneEnter{from{opacity:.04;transform:perspective(1400px) rotateY(0deg) scale(.985)}to{opacity:1;transform:perspective(1400px) rotateY(0deg) scale(1)}}',
       '@keyframes zqAiIconSpin{to{transform:rotate(360deg)}}',
       '@keyframes zqAiConversationSwitch{from{opacity:.24;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}',
       '@keyframes zqAiConversationLabel{from{opacity:.35;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}',
       '@keyframes zqAiMessageIn{0%{opacity:.08;transform:translateY(8px) scale(.82)}72%{opacity:1;transform:translateY(-1px) scale(1.02)}100%{opacity:1;transform:translateY(0) scale(1)}}',
       '@keyframes zqAiPulse{0%,100%{opacity:.28;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}',
-      '@media(max-width:760px){.zq-ai-shell,.zq-ai-shell[data-sidebar-collapsed="true"]{grid-template-columns:1fr}.zq-ai-shell[data-sidebar-collapsed="true"] .zq-ai-sidebar{padding:18px 14px}.zq-ai-shell[data-sidebar-collapsed="true"] .zq-ai-brand-row{flex-direction:row;justify-content:space-between}.zq-ai-shell[data-sidebar-collapsed="true"] .zq-ai-brand{display:block}.zq-ai-shell[data-sidebar-collapsed="true"] .zq-ai-sidebar-actions{flex-direction:row}.zq-ai-shell[data-sidebar-collapsed="true"] .zq-ai-conversation-list{display:flex}.zq-ai-icon-button.zq-ai-sidebar-toggle{display:none}.zq-ai-sidebar-scrim{display:block;position:fixed;z-index:10;inset:0;background:rgba(20,30,35,.42);opacity:0;pointer-events:none;transition:opacity 180ms ease-out}.zq-ai-sidebar-scrim:not([hidden]){opacity:1;pointer-events:auto}.zq-ai-sidebar{position:absolute;z-index:20;inset:0 18% 0 0;transform:translateX(-104%);transition:transform 180ms ease-out;box-shadow:12px 0 24px rgba(36,49,57,.18);touch-action:pan-y}.zq-ai-sidebar[data-open="true"]{transform:translateX(0)}.zq-ai-icon-button.zq-ai-sidebar-close{display:grid}.zq-ai-main{grid-template-rows:minmax(136px,24vh) minmax(0,1fr)}.zq-ai-stage-title{left:18px;top:22px;max-width:48%}.zq-ai-stage[data-portrait-mode="alice"] .zq-ai-stage-title{max-width:42%}.zq-ai-stage-title p{display:none}.zq-ai-portrait{right:18px;width:190px;height:220px;transform:scale(.88);transform-origin:bottom right}.zq-ai-portrait[data-mode="alice"]{right:10px;width:46%;height:calc(100% - 18px);bottom:9px;transform:none}.zq-ai-mobile-menu{display:grid}.zq-ai-toolbar{padding-inline:10px}.zq-ai-memory span{display:none}.zq-ai-messages{padding:14px 12px 18px}.zq-ai-bubble{max-width:88%;font-size:13px;line-height:20px}.zq-ai-message[data-editing="true"] .zq-ai-bubble{width:96%;max-width:96%}.zq-ai-inline-cancel,.zq-ai-inline-submit{min-width:68px;padding-inline:14px}.zq-ai-recommendations{grid-template-columns:1fr}.zq-ai-nav-item{min-height:52px}.zq-ai-composer{padding-inline:10px}}',
+      '@media(max-width:760px){.zq-ai-shell,.zq-ai-shell[data-sidebar-collapsed="true"]{grid-template-columns:1fr}.zq-ai-shell[data-sidebar-collapsed="true"] .zq-ai-sidebar{padding:18px 14px}.zq-ai-shell[data-sidebar-collapsed="true"] .zq-ai-brand-row{flex-direction:row;justify-content:space-between}.zq-ai-shell[data-sidebar-collapsed="true"] .zq-ai-brand{display:block}.zq-ai-shell[data-sidebar-collapsed="true"] .zq-ai-sidebar-actions{flex-direction:row}.zq-ai-shell[data-sidebar-collapsed="true"] .zq-ai-conversation-list{display:flex}.zq-ai-icon-button.zq-ai-sidebar-toggle{display:none}.zq-ai-sidebar-scrim{display:block;position:fixed;z-index:10;inset:0;background:rgba(20,30,35,.42);opacity:0;pointer-events:none;transition:opacity 180ms ease-out}.zq-ai-sidebar-scrim:not([hidden]){opacity:1;pointer-events:auto}.zq-ai-sidebar{position:absolute;z-index:20;inset:0 18% 0 0;transform:translateX(-104%);transition:transform 180ms ease-out;box-shadow:12px 0 24px rgba(36,49,57,.18);touch-action:pan-y}.zq-ai-sidebar[data-open="true"]{transform:translateX(0)}.zq-ai-icon-button.zq-ai-sidebar-close{display:grid}.zq-ai-main{grid-template-rows:minmax(136px,24vh) minmax(0,1fr)}.zq-ai-stage-title{left:18px;top:22px;max-width:48%}.zq-ai-stage[data-portrait-mode="alice"] .zq-ai-stage-title{max-width:42%}.zq-ai-stage-title p{display:none}.zq-ai-portrait{right:18px;width:190px;height:220px;transform:scale(.88);transform-origin:bottom right}.zq-ai-portrait[data-mode="alice"]{right:10px;width:46%;height:calc(100% - 18px);bottom:9px;transform:none}.zq-ai-mobile-menu{display:grid}.zq-ai-toolbar{padding-inline:10px}.zq-ai-settings-menu{right:10px;width:min(320px,calc(100vw - 20px))}.zq-ai-messages{padding:14px 12px 18px}.zq-ai-bubble{max-width:88%;font-size:13px;line-height:20px}.zq-ai-message[data-editing="true"] .zq-ai-bubble{width:96%;max-width:96%}.zq-ai-inline-cancel,.zq-ai-inline-submit{min-width:68px;padding-inline:14px}.zq-ai-recommendations{grid-template-columns:1fr}.zq-ai-nav-item{min-height:52px}.zq-ai-composer{padding-inline:10px}}',
       '@media(max-width:390px){.zq-ai-stage-title h1{font-size:20px}.zq-ai-portrait{right:4px}.zq-ai-nav-item{font-size:9px}.zq-ai-dialogue{backdrop-filter:none}}',
-      '@media(prefers-reduced-motion:reduce){.zq-ai-page,#root.zq-ai-native-page-enter,.zq-ai-nav-icon,.zq-ai-shell,.zq-ai-sidebar,.zq-ai-sidebar-scrim,.zq-ai-send,.zq-ai-dialogue[data-conversation-switching="true"],.zq-ai-conversation-list[data-switching="true"] .zq-ai-conversation[data-active="true"],.zq-ai-message[data-entering="true"] .zq-ai-bubble{transition:none!important;animation:none!important}.zq-ai-nav-item[data-active="true"] .zq-ai-nav-icon{transform:none}.zq-ai-loading-dots i{animation:none}.zq-ai-messages{scroll-behavior:auto}}'
+      '@media(prefers-reduced-motion:reduce){.zq-ai-page,#root.zq-ai-assistant-source-exit,#root.zq-ai-native-page-enter,.zq-ai-nav-icon,.zq-ai-shell,.zq-ai-sidebar,.zq-ai-sidebar-scrim,.zq-ai-send,.zq-ai-dialogue[data-conversation-switching="true"],.zq-ai-conversation-list[data-switching="true"] .zq-ai-conversation[data-active="true"],.zq-ai-message[data-entering="true"] .zq-ai-bubble{transition:none!important;animation:none!important}.zq-ai-nav-item[data-active="true"] .zq-ai-nav-icon{transform:none}.zq-ai-loading-dots i{animation:none}.zq-ai-messages{scroll-behavior:auto}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -480,6 +498,7 @@
       'book-open': '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>',
       'panel-left-close': '<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path><path d="m16 15-3-3 3-3"></path>',
       'panel-left-open': '<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path><path d="m14 9 3 3-3 3"></path>',
+      settings: '<path d="M4 21v-7"></path><path d="M4 10V3"></path><path d="M12 21v-9"></path><path d="M12 8V3"></path><path d="M20 21v-5"></path><path d="M20 12V3"></path><path d="M1 14h6"></path><path d="M9 8h6"></path><path d="M17 16h6"></path>',
       check: '<path d="m5 12 4 4L19 6"></path>',
       'thumbs-up': '<path d="M7 10v12"></path><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2h0a3.13 3.13 0 0 1 3 3.88Z"></path>',
       'thumbs-down': '<g transform="rotate(180 12 12)"><path d="M7 10v12"></path><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2h0a3.13 3.13 0 0 1 3 3.88Z"></path></g>',
@@ -611,6 +630,13 @@
     var page = document.createElement('main');
     page.className = 'zq-ai-page';
     page.setAttribute(PAGE_MARKER, 'true');
+    if (state.enteringAssistant) {
+      page.setAttribute('data-entering', 'true');
+      state.enteringAssistant = false;
+      window.setTimeout(function () {
+        if (page.isConnected) page.removeAttribute('data-entering');
+      }, 460);
+    }
     page.innerHTML = '<div class="zq-ai-sidebar-scrim" data-zq-sidebar-scrim hidden aria-hidden="true"></div><div class="zq-ai-shell"><aside class="zq-ai-sidebar" id="zq-ai-sidebar-panel" data-zq-ai-sidebar aria-hidden="true"><div class="zq-ai-brand-row"><button type="button" class="zq-ai-icon-button zq-ai-sidebar-toggle" data-zq-toggle-sidebar aria-label="\u6536\u8d77\u4f1a\u8bdd\u5217\u8868" aria-expanded="true" aria-controls="zq-ai-sidebar-panel"></button><span class="zq-ai-brand">AI\u52a9\u624b</span><div class="zq-ai-sidebar-actions"><button type="button" class="zq-ai-icon-button" data-zq-new-conversation aria-label="\u65b0\u5efa\u4f1a\u8bdd">+</button><button type="button" class="zq-ai-icon-button zq-ai-sidebar-close" data-zq-close-sidebar aria-label="\u5173\u95ed\u4f1a\u8bdd\u5217\u8868">×</button></div></div><div class="zq-ai-conversation-list" data-zq-conversations></div></aside><section class="zq-ai-main"><div class="zq-ai-stage"><div class="zq-ai-stage-lines" aria-hidden="true"></div><div class="zq-ai-stage-title"><h1>AI\u5b66\u4e60\u52a9\u624b</h1><p>\u5bf9\u8bdd\u3001\u5b66\u4e60\u89e3\u7b54\u4e0e\u5185\u5bb9\u63a8\u8350\u7531\u540c\u4e00\u4e2a\u8f93\u5165\u6846\u5b8c\u6210\u3002</p></div></div><div class="zq-ai-dialogue" data-zq-dialogue></div></section></div>';
     page.querySelector('.zq-ai-stage').appendChild(createPortrait());
     page.querySelector('[data-zq-toggle-sidebar]').addEventListener('click', function () {
@@ -629,6 +655,11 @@
     page.querySelector('[data-zq-ai-sidebar]').addEventListener('touchend', handleSidebarTouchEnd, { passive: true });
     page.querySelector('[data-zq-ai-sidebar]').addEventListener('touchcancel', handleSidebarTouchCancel, { passive: true });
     state.sidebarKeyHandler = function (event) {
+      if (event.key === 'Escape' && state.settingsOpen) {
+        event.preventDefault();
+        setSettingsOpen(false);
+        return;
+      }
       if (event.key === 'Escape' && state.sidebarOpen) {
         event.preventDefault();
         setSidebarOpen(false);
@@ -691,6 +722,19 @@
     }
   }
 
+  function setSettingsOpen(open, options) {
+    var settings = options || {};
+    state.settingsOpen = !!open;
+    if (!settings.skipRender) renderDialogue();
+    if (settings.restoreFocus === false) return;
+    window.requestAnimationFrame(function () {
+      var target = state.settingsOpen
+        ? document.querySelector('[data-zq-memory-setting]')
+        : document.querySelector('[data-zq-open-settings]');
+      if (target) target.focus();
+    });
+  }
+
   function handleSidebarTouchStart(event) {
     if (!state.sidebarOpen || !event.changedTouches || event.changedTouches.length !== 1) return;
     var touch = event.changedTouches[0];
@@ -712,6 +756,7 @@
 
   function removePage() {
     setSidebarOpen(false, { skipRender: true, restoreFocus: false });
+    state.settingsOpen = false;
     resetEditingState();
     var page = document.querySelector('[' + PAGE_MARKER + ']');
     if (page) page.remove();
@@ -738,6 +783,7 @@
     // Remove only the assistant surface before the native tab press. Keeping
     // the shared navigation mounted avoids a bar swap during the page turn.
     setSidebarOpen(false, { skipRender: true, restoreFocus: false });
+    state.settingsOpen = false;
     resetEditingState();
     var page = document.querySelector('[' + PAGE_MARKER + ']');
     if (page) page.remove();
@@ -765,12 +811,25 @@
     // its exported scene interpolator on the shell for that one route case.
     var root = document.getElementById('root');
     if (!root) return;
+    root.classList.remove('zq-ai-assistant-source-exit');
     root.classList.remove('zq-ai-native-page-enter');
     void root.offsetWidth;
     root.classList.add('zq-ai-native-page-enter');
     window.setTimeout(function () {
       root.classList.remove('zq-ai-native-page-enter');
     }, 580);
+  }
+
+  function playAssistantSourceExit() {
+    var root = document.getElementById('root');
+    if (!root) return;
+    root.classList.remove('zq-ai-native-page-enter');
+    root.classList.remove('zq-ai-assistant-source-exit');
+    void root.offsetWidth;
+    root.classList.add('zq-ai-assistant-source-exit');
+    window.setTimeout(function () {
+      root.classList.remove('zq-ai-assistant-source-exit');
+    }, 280);
   }
 
   function renderStatus(title, detail, actionLabel, action) {
@@ -1354,24 +1413,67 @@
     menu.setAttribute('aria-controls', 'zq-ai-sidebar-panel');
     menu.textContent = '\u2630';
     menu.addEventListener('click', function () {
-      setSidebarOpen(!state.sidebarOpen, { trigger: menu });
+      state.settingsOpen = false;
+      setSidebarOpen(!state.sidebarOpen, { trigger: menu, skipRender: true });
+      renderDialogue();
     });
     state.sidebarTrigger = menu;
     var active = state.conversations.find(function (item) { return item.id === state.activeConversationId; });
     var title = document.createElement('div');
     title.className = 'zq-ai-toolbar-title';
     title.textContent = active ? active.title : 'AI\u52a9\u624b';
-    var memory = document.createElement('label');
-    memory.className = 'zq-ai-memory';
-    var memoryInput = document.createElement('input');
-    memoryInput.type = 'checkbox';
-    memoryInput.checked = state.memoryEnabled;
-    memoryInput.setAttribute('aria-label', '\u5141\u8bb8\u4fdd\u5b58\u957f\u671f\u8bb0\u5fc6');
-    memoryInput.addEventListener('change', function () { state.memoryEnabled = memoryInput.checked; });
-    var memoryText = document.createElement('span');
-    memoryText.textContent = '\u5141\u8bb8\u957f\u671f\u8bb0\u5fc6';
-    memory.append(memoryInput, memoryText);
-    toolbar.append(menu, title, memory);
+    var settingsButton = document.createElement('button');
+    settingsButton.type = 'button';
+    settingsButton.className = 'zq-ai-icon-button zq-ai-settings-button';
+    settingsButton.setAttribute('data-zq-open-settings', 'true');
+    settingsButton.setAttribute('aria-label', '\u6253\u5f00 AI \u52a9\u624b\u8bbe\u7f6e');
+    settingsButton.setAttribute('aria-haspopup', 'dialog');
+    settingsButton.setAttribute('aria-expanded', state.settingsOpen ? 'true' : 'false');
+    settingsButton.setAttribute('aria-controls', 'zq-ai-settings-menu');
+    labelMessageAction(settingsButton, 'settings', '\u6253\u5f00 AI \u52a9\u624b\u8bbe\u7f6e');
+    settingsButton.addEventListener('click', function () {
+      if (state.sidebarOpen) setSidebarOpen(false, { skipRender: true, restoreFocus: false });
+      setSettingsOpen(!state.settingsOpen);
+    });
+    toolbar.append(menu, title, settingsButton);
+
+    if (state.settingsOpen) {
+      var settingsScrim = document.createElement('button');
+      settingsScrim.type = 'button';
+      settingsScrim.className = 'zq-ai-settings-scrim';
+      settingsScrim.tabIndex = -1;
+      settingsScrim.setAttribute('aria-label', '\u5173\u95ed AI \u52a9\u624b\u8bbe\u7f6e');
+      settingsScrim.addEventListener('click', function () { setSettingsOpen(false); });
+
+      var settingsMenu = document.createElement('section');
+      settingsMenu.id = 'zq-ai-settings-menu';
+      settingsMenu.className = 'zq-ai-settings-menu';
+      settingsMenu.setAttribute('role', 'dialog');
+      settingsMenu.setAttribute('aria-label', 'AI \u52a9\u624b\u8bbe\u7f6e');
+      var settingsHeading = document.createElement('h2');
+      settingsHeading.className = 'zq-ai-settings-heading';
+      settingsHeading.textContent = 'AI \u52a9\u624b\u8bbe\u7f6e';
+      var memory = document.createElement('label');
+      memory.className = 'zq-ai-settings-option';
+      var memoryCopy = document.createElement('span');
+      memoryCopy.className = 'zq-ai-settings-copy';
+      var memoryTitle = document.createElement('span');
+      memoryTitle.className = 'zq-ai-settings-title';
+      memoryTitle.textContent = '\u5141\u8bb8\u4fdd\u5b58\u957f\u671f\u8bb0\u5fc6';
+      var memoryDescription = document.createElement('span');
+      memoryDescription.className = 'zq-ai-settings-description';
+      memoryDescription.textContent = '\u7528\u7ecf\u8fc7\u9690\u79c1\u8fc7\u6ee4\u7684\u6458\u8981\u5ef6\u7eed\u4ee5\u540e\u7684\u5bf9\u8bdd';
+      memoryCopy.append(memoryTitle, memoryDescription);
+      var memoryInput = document.createElement('input');
+      memoryInput.type = 'checkbox';
+      memoryInput.checked = state.memoryEnabled;
+      memoryInput.setAttribute('data-zq-memory-setting', 'true');
+      memoryInput.setAttribute('aria-label', '\u5141\u8bb8\u4fdd\u5b58\u957f\u671f\u8bb0\u5fc6');
+      memoryInput.addEventListener('change', function () { state.memoryEnabled = memoryInput.checked; });
+      memory.append(memoryCopy, memoryInput);
+      settingsMenu.append(settingsHeading, memory);
+      toolbar.append(settingsScrim, settingsMenu);
+    }
 
     var messages = document.createElement('div');
     messages.className = 'zq-ai-messages';
@@ -1507,6 +1609,7 @@
   function createConversation(options) {
     if (state.loading || !session() || !state.config || !state.config.configured) return Promise.resolve();
     var requestId = createRequestId();
+    state.settingsOpen = false;
     setPortraitVisible(false);
     resetEditingState();
     var animate = !!(options && options.animate);
@@ -1559,6 +1662,7 @@
 
   function openConversation(id) {
     if (!id) return Promise.resolve();
+    state.settingsOpen = false;
     setPortraitVisible(false);
     resetEditingState();
     state.activeConversationId = id;

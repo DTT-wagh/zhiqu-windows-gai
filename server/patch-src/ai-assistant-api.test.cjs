@@ -1,5 +1,22 @@
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const assistantSourceRoot = path.join(__dirname, 'com', 'zhiqu', 'server', 'assistant');
+const assistantClientSource = fs.readFileSync(path.join(assistantSourceRoot, 'AiAssistantClient.java'), 'utf8');
+const assistantServiceSource = fs.readFileSync(path.join(assistantSourceRoot, 'AiAssistantService.java'), 'utf8');
+
+assert.match(assistantClientSource, /persona\.voiceProfile/, 'active persona must apply its voice profile');
+assert.match(assistantClientSource, /persona\.reasoningStyle/, 'active persona must apply its reasoning style');
+assert.match(assistantClientSource, /人格模式只改变表达方式和组织回答的过程/, 'persona must not override factual and safety rules');
+assert.match(assistantServiceSource, /hidden-fairytale-companion-v2/, 'hidden persona must use the detailed style contract');
+assert.match(assistantServiceSource, /persona\.put\("dialogueRhythm"/, 'persona must define a stable dialogue rhythm');
+assert.match(assistantServiceSource, /persona\.put\("emotionalContrast"/, 'persona must preserve its distinctive emotional contrast');
+assert.match(assistantServiceSource, /persona\.put\("interactionStyle"/, 'persona must define its response organization');
+assert.match(assistantServiceSource, /persona\.put\("relationshipBoundary"/, 'persona must retain child-safe relationship boundaries');
+assert.match(assistantServiceSource, /不复述、改写或拼接原作台词/, 'persona must preserve the copyright boundary');
+assert.match(assistantClientSource, /不要退回普通客服式安慰/, 'active persona must avoid generic assistant phrasing');
 
 const baseUrl = String(process.env.ZHIQU_API_BASE_URL || 'http://127.0.0.1:18080').replace(/\/+$/, '');
 
