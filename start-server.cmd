@@ -20,9 +20,12 @@ if errorlevel 1 (
 echo Assembling server from the immutable baseline and registered patches ...
 node patch-src\apply-patches.cjs
 if errorlevel 1 (
-  echo Server assembly failed. Check the patch output above.
-  pause
-  exit /b 1
+  if not exist generated\zhiqu-server.jar (
+    echo Server assembly failed and no previously generated server is available.
+    pause
+    exit /b 1
+  )
+  echo WARNING: Server assembly failed. Starting the last successfully generated server.
 )
 
 if exist .env set SPRING_CONFIG_IMPORT=optional:file:.env[.properties]
