@@ -28,6 +28,10 @@
     {
       "name": "hot-ranking",
       "script": "server/patch-src/patch-hot-ranking.cjs"
+    },
+    {
+      "name": "magic-friends",
+      "script": "server/patch-src/patch-magic-friends.cjs"
     }
   ]
 }
