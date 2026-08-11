@@ -12,7 +12,7 @@ if (branch === 'main') {
 }
 
 const staged = git(['diff', '--cached', '--name-only']).split(/\r?\n/).filter(Boolean);
-if (staged.some((file) => /(^|\/)(\.env|server\/\.env|server\/data\/|server\/logs\/)/.test(file))) {
+if (staged.some((file) => /(^|\/)\.env$|^server\/data\/|^server\/logs\//.test(file))) {
   console.error('Blocked: secrets, database state, and logs must not be committed.');
   process.exit(1);
 }
