@@ -7,6 +7,11 @@ server/logs/
 server/generated/
 server/*-runtime*.log
 frontend/*-runtime*.log
+/*-runtime*.log
+/server/.tmp-*.log
+/server/backend-restart-*.log
+/frontend/.tmp-*.log
+/server/.h2-recovery-*/
 
 # Patch backups and compilation scratch space
 server/zhiqu-server.jar.before-*
