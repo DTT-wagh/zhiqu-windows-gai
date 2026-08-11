@@ -6,7 +6,9 @@
   var refreshPromise = null;
 
   function apiBase() {
-    return String(global.__ZHIQU_API_BASE_URL || '').replace(/\/+$/, '');
+    // The static demo server normally injects this value. Keep local standalone
+    // runs connected to the bundled backend when that injection is omitted.
+    return String(global.__ZHIQU_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '');
   }
 
   function session() {

@@ -34,6 +34,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
@@ -43,6 +45,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 @Service
 public class SinglePlayerGameService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(SinglePlayerGameService.class);
     private static final int SINGLE_LEVEL = 1;
     private static final String CONTENT_VERSION = "spg-v2";
     private static final Duration INSTANCE_TTL = Duration.ofHours(24);
@@ -77,6 +80,10 @@ public class SinglePlayerGameService {
         };
         this.generationExecutor = new ThreadPoolExecutor(
                 2, 2, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(12), factory, new ThreadPoolExecutor.AbortPolicy());
+        int interrupted = repository.markInterruptedGenerations(Instant.now());
+        if (interrupted > 0) {
+            LOGGER.info("Marked {} interrupted single-player generation task(s) as retryable", interrupted);
+        }
     }
 
     List<GameSummary> games() {
@@ -213,15 +220,18 @@ public class SinglePlayerGameService {
         JsonNode publicRound = findRound(publicContent.path("rounds"), roundId);
         JsonNode answer = findRound(answerSpec.path("rounds"), roundId);
         Evaluation result = generator(row.gameCode()).evaluate(publicRound, answer, request.action());
-        int nextRound = row.currentRound() + (result.correct() ? 1 : 0);
+        int totalRounds = totalRounds(publicContent);
+        boolean completesOnFirstSubmission = "image-detective".equals(row.gameCode());
+        int nextRound = row.currentRound() + (result.correct() || completesOnFirstSubmission ? 1 : 0);
         StoredEvaluation stored = new StoredEvaluation(
                 result.correct(), result.hint(), result.feedback(), result.comparison(), result.ability(),
-                nextRound, nextRound == 3
+                nextRound, nextRound >= totalRounds
         );
         Instant now = Instant.now();
         SubmissionRow submission = repository.insertSubmission(
                 instanceId, roundId, request.requestId(), actionJson, writeJson(stored), now);
-        if (result.correct() && repository.advanceRound(instanceId, row.currentRound(), now) != 1) {
+        if ((result.correct() || completesOnFirstSubmission)
+                && repository.advanceRound(instanceId, row.currentRound(), now) != 1) {
             throw SinglePlayerGameErrors.conflict(
                     "SINGLE_PLAYER_ROUND_ALREADY_ADVANCED", "本轮已经完成，请刷新后继续"
             );
@@ -238,9 +248,10 @@ public class SinglePlayerGameService {
             }
             return readValue(row.finishResultJson(), FinishView.class);
         }
-        if (!"READY".equals(row.status()) || row.currentRound() != 3) {
+        int totalRounds = totalRounds(readJson(row.publicContentJson()));
+        if (!"READY".equals(row.status()) || row.currentRound() != totalRounds) {
             throw SinglePlayerGameErrors.conflict(
-                    "SINGLE_PLAYER_ROUNDS_INCOMPLETE", "完成三轮挑战后才能结算"
+                    "SINGLE_PLAYER_ROUNDS_INCOMPLETE", "完成本局挑战后才能结算"
             );
         }
         String childDiscovery = request.discovery() == null ? "" : request.discovery().trim();
@@ -250,7 +261,7 @@ public class SinglePlayerGameService {
             );
         }
         Instant now = Instant.now();
-        if (repository.markCompleted(instanceId, request.requestId(), now) != 1) {
+        if (repository.markCompleted(instanceId, request.requestId(), totalRounds, now) != 1) {
             InstanceRow completed = requireOwned(userId, instanceId);
             if (completed.finishResultJson() != null) return readValue(completed.finishResultJson(), FinishView.class);
             throw SinglePlayerGameErrors.conflict("SINGLE_PLAYER_FINISH_IN_PROGRESS", "结算正在保存，请稍后重试");
@@ -292,9 +303,12 @@ public class SinglePlayerGameService {
                         row.id(), writeJson(game.publicContent()), writeJson(game.answerSpec()), game.modelName(), Instant.now());
                 return;
             } catch (GenerationFailure failure) {
+                LOGGER.warn("Single-player generation rejected for game {} instance {}: {} {}",
+                        row.gameCode(), row.id(), failure.code(), failure.getMessage());
                 last = failure;
                 if (!failure.retryable()) break;
             } catch (RuntimeException failure) {
+                LOGGER.error("Single-player generation failed unexpectedly for game {} instance {}", row.gameCode(), row.id(), failure);
                 last = new GenerationFailure("GENERATION_INTERNAL_ERROR", "生成流程发生错误", "FAILED", false);
                 break;
             }
@@ -400,6 +414,14 @@ public class SinglePlayerGameService {
         throw SinglePlayerGameErrors.conflict("SINGLE_PLAYER_ROUND_INVALID", "本轮内容不可用，请重新生成");
     }
 
+    private int totalRounds(JsonNode publicContent) {
+        JsonNode rounds = publicContent == null ? null : publicContent.path("rounds");
+        if (rounds == null || !rounds.isArray() || rounds.size() == 0) {
+            throw SinglePlayerGameErrors.conflict("SINGLE_PLAYER_ROUND_INVALID", "本局内容不可用，请重新生成");
+        }
+        return rounds.size();
+    }
+
     private String writeJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -442,8 +464,8 @@ public class SinglePlayerGameService {
         ));
         definitions.put("image-detective", new GameDefinition(
                 "image-detective", "图片侦探", "美术、观察、空间关系",
-                "比较实际图片、视觉模型识别和自己的观察。",
-                "用主体、颜色、形状、位置和关系证据核对 AI 的识别。", 7
+                "比较同一张完整图和删除元素后的缺失图，找出最能帮助 AI 识别目标的元素。",
+                "通过放回真实元素，观察 AI 如何依赖物体、用途和场景关系识别目标。", 7
         ));
         definitions.put("sound-conductor", new GameDefinition(
                 "sound-conductor", "声音小指挥", "音乐、情绪表达",

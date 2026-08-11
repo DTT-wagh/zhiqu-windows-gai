@@ -3,13 +3,53 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const { randomUUID } = require('node:crypto');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
 const serverRoot = path.join(projectRoot, 'server');
 const jarPath = path.resolve(process.env.ZHIQU_SERVER_JAR || path.join(serverRoot, 'generated', 'zhiqu-server.jar'));
 const tempRoot = fs.mkdtempSync(path.join(serverRoot, '.patch-single-player-api-'));
-const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlXQAAAAASUVORK5CYII=';
+function pngChunk(type, data) {
+  const name = Buffer.from(type);
+  const payload = Buffer.concat([name, data]);
+  let crc = 0xffffffff;
+  for (const byte of payload) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  const checksum = Buffer.alloc(4);
+  checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0, 0);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length, 0);
+  return Buffer.concat([length, payload, checksum]);
+}
+
+function solidPng(size = 96) {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const pixels = Buffer.alloc(size * (size * 3 + 1));
+  for (let row = 0; row < size; row += 1) {
+    const offset = row * (size * 3 + 1);
+    pixels[offset] = 0;
+    for (let column = 0; column < size; column += 1) {
+      pixels[offset + 1 + column * 3] = 230;
+      pixels[offset + 2 + column * 3] = 240;
+      pixels[offset + 3 + column * 3] = 232;
+    }
+  }
+  return Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'),
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', zlib.deflateSync(pixels)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]).toString('base64');
+}
+
+const tinyPng = solidPng();
 let generationCounter = 0;
 let promptGenerationCounter = 0;
 let visionRequestCounter = 0;
@@ -94,7 +134,7 @@ function promptGame(levelNo) {
     },
   ];
   return {
-    safety: { status: 'SAFE', reason: '适龄结构内容' },
+    safety: { status: 'REJECTED', reason: '模拟本地儿童安全误判，完整关卡仍应通过' },
     instruction: `观察本局句子怎样被 AI 拆成字段，${suffix}。`,
     demo: {
       title: '对象示范', original: `请整理 ${suffix}`, aiExtracted: ['动作：整理'],
@@ -168,29 +208,17 @@ function soundGame() {
 
 function imageGame() {
   return {
-    safety: { status: 'SAFE', reason: '原创抽象场景' }, instruction: '观察本局图片和视觉识别结果。',
+    safety: { status: 'SAFE', reason: '原创生活场景' }, instruction: '比较同一张生活场景完整图和缺失图，找出最能帮助 AI 识别目标的元素。',
     sceneSpec: {
-      imagePrompt: '原创儿童插画，绿色圆形盒子上方有黄色三角旗，不含文字和真实人物。',
+      target: { id: 'target', label: '孩子正在把苹果放进篮子', recognitionPrompt: '判断孩子是否正在把苹果放进篮子' },
+      imagePrompt: '原创儿童生活场景插画：孩子在厨房把苹果放进篮子，旁边有冰箱贴和水槽边的蓝色抹布，不含文字和真实人物。',
       elements: [
-        { id: 'box', label: '绿色圆形盒子', primary: true, color: '深绿色', shape: '圆形', x: 50, y: 60, relation: '在下方' },
-        { id: 'flag', label: '黄色三角旗', primary: false, color: '亮黄色', shape: '三角形', x: 50, y: 25, relation: '在盒子上方' },
+        { id: 'basket', label: '装苹果的篮子', role: 'CRITICAL', category: '收纳容器', purpose: '盛放苹果', visualTrait: '藤编开口篮', bbox: { x: 12, y: 58, width: 26, height: 24 } },
+        { id: 'sticker', label: '冰箱上的星星贴纸', role: 'IRRELEVANT', category: '装饰贴纸', purpose: '装饰冰箱门', visualTrait: '黄色星形纸片', bbox: { x: 66, y: 14, width: 20, height: 18 } },
+        { id: 'cloth', label: '水槽边的蓝色抹布', role: 'IRRELEVANT', category: '清洁用品', purpose: '擦干水槽边缘', visualTrait: '蓝色折叠布料', bbox: { x: 56, y: 64, width: 24, height: 18 } },
       ],
     },
-    variantSceneSpec: {
-      imagePrompt: '原创儿童插画，蓝色圆形盒子上方有黄色三角旗，不含文字和真实人物。',
-      elements: [
-        { id: 'box', label: '蓝色圆形盒子', primary: true, color: '深蓝色', shape: '圆形', x: 50, y: 60, relation: '在下方' },
-        { id: 'flag', label: '黄色三角旗', primary: false, color: '亮黄色', shape: '三角形', x: 50, y: 25, relation: '在盒子上方' },
-      ],
-    },
-    change: { elementId: 'box', field: 'color', before: '深绿色', after: '深蓝色' },
-    demo: { title: '主体示范', explanation: '主体同时有形状和位置证据。' },
-    rounds: [1, 2, 3].map((number) => ({
-      roundId: `r${number}`, title: '元素观察', prompt: '哪个选项对应画面主体？',
-      options: [option(`r${number}-good`, '绿色圆形盒子', { elementId: 'box', value: 'box', key: 'element' }), option(`r${number}-bad`, '黄色三角旗', { elementId: 'flag', value: 'flag', key: 'element' })],
-      answer: { targetElementId: 'box', targetValue: 'box', targetKey: 'element', hint: '同时看大小、形状和位置。', feedback: '主体盒子被图片规格和视觉模型同时识别。', comparison: { element: 'box' }, ability: ability() },
-    })),
-    result: resultDetails('我发现主体需要多条画面证据。', '视觉模型仍可能漏看小元素。'),
+    result: resultDetails('我发现不同元素对 AI 识别目标的作用不同。', '这个模型的判断只适用于本局图片。'),
   };
 }
 
@@ -198,10 +226,12 @@ function recognition() {
   return {
     safety: { status: 'SAFE', reason: '画面安全' },
     detections: [
-      { sceneElementId: 'box', label: '绿色圆形盒子', confidence: 0.96, relation: '在下方' },
-      { sceneElementId: 'flag', label: '黄色三角旗', confidence: 0.93, relation: '在盒子上方' },
+      { sceneElementId: 'basket', label: '装苹果的篮子', confidence: 0.93, relation: '在孩子前方' },
+      { sceneElementId: 'sticker', label: '冰箱上的星星贴纸', confidence: 0.89, relation: '在冰箱上' },
+      { sceneElementId: 'cloth', label: '水槽边的蓝色抹布', confidence: 0.88, relation: '在水槽旁' },
     ],
-    altText: '一只绿色圆形盒子位于画面下方，一面黄色三角旗在盒子上方。',
+    targetRecognition: { targetLabel: '孩子正在把苹果放进篮子', detected: true, confidence: 0.93, description: 'AI 判断孩子正在把苹果放进篮子。' },
+    altText: 'AI 看到孩子正在把苹果放进篮子，旁边有冰箱贴和蓝色抹布。',
   };
 }
 
@@ -222,10 +252,10 @@ function createFakeProvider() {
         imageRequestCounter += 1;
         assert.equal(body.quality, 'low', 'single-player images must use the latency-friendly quality tier');
         assert.equal(body.size, '512x512', 'single-player images must fit the mobile game surface without oversized generation');
-        assert.ok(body.prompt.includes('元素清晰分开'), 'image prompts must use the compact structured scene description');
-        assert.ok(body.prompt.length <= 600, 'image prompts must stay within the latency-friendly length cap');
-        response.writeHead(503, { 'Content-Type': 'application/json' });
-        response.end(JSON.stringify({ error: { code: 'provider_busy' } }));
+        assert.ok(body.prompt.includes('生活场景') && body.prompt.includes('物品'), 'image prompts must describe generated daily-life elements');
+        assert.ok(body.prompt.length <= 1400, 'image prompts must stay within the structured prompt cap');
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ data: [{ b64_json: tinyPng }] }));
         return;
       }
       let body;
@@ -239,7 +269,34 @@ function createFakeProvider() {
           openAiResponse(response, { safety: { status: 'REJECTED', reason: '模拟一次视觉安全误判' } });
           return;
         }
-        openAiResponse(response, recognition());
+        const text = Array.isArray(user) ? user.find((item) => item.type === 'text')?.text || '' : '';
+        let analysis = {};
+        try { analysis = JSON.parse(text.replace(/^sceneSpec=/, '')); } catch { /* malformed analysis is handled by the API */ }
+        const visible = (id) => analysis.elements?.find((item) => item.id === id)?.visible !== false;
+        const basketVisible = visible('basket');
+        const stickerVisible = visible('sticker');
+        const clothVisible = visible('cloth');
+        if (basketVisible) {
+          openAiResponse(response, recognition());
+          return;
+        }
+        const missing = recognition();
+        missing.detections = [
+          ...(stickerVisible ? [{ sceneElementId: 'sticker', label: '冰箱上的星星贴纸', confidence: 0.84, relation: '在冰箱上' }] : []),
+          ...(clothVisible ? [{ sceneElementId: 'cloth', label: '水槽边的蓝色抹布', confidence: 0.82, relation: '在水槽旁' }] : []),
+        ];
+        missing.targetRecognition = {
+          targetLabel: '孩子正在把苹果放进篮子',
+          detected: false,
+          confidence: stickerVisible || clothVisible ? 0.20 : 0.18,
+          description: stickerVisible || clothVisible
+            ? 'AI 仍然不能确定孩子正在把苹果放进篮子。'
+            : 'AI 只看到孩子在厨房附近，不能确定正在把苹果放进篮子。',
+        };
+        missing.altText = stickerVisible || clothVisible
+          ? 'AI 仍然不能确定孩子正在把苹果放进篮子。'
+          : 'AI 看到孩子和桌面，但没有确定正在把苹果放进篮子。';
+        openAiResponse(response, missing);
         return;
       }
       let context = {};
@@ -478,19 +535,56 @@ async function create(baseUrl, token, gameCode, levelNo) {
 
     const imageCreated = await create(baseUrl, alice.accessToken, 'image-detective', 1);
     const imageReady = await waitInstance(baseUrl, alice.accessToken, imageCreated.instanceId);
-    assert.equal(imageReady.status, 'READY');
-    assert.ok(imageRequestCounter >= 4, 'provider failures must fall back to local scene rendering on both generation attempts');
-    assert.ok(visionRequestCounter >= 3, 'a rejected vision result must automatically regenerate once');
+    assert.equal(imageReady.status, 'READY', `image detective generation details: ${JSON.stringify(imageReady)}`);
+    assert.ok(imageRequestCounter >= 2, 'the complete image must be regenerated after a rejected vision result');
+    assert.ok(visionRequestCounter >= 5, 'a rejected vision result must automatically regenerate and verify each candidate removal');
     assert.match(imageReady.content.imageUrl, /^\/api\/single-player-games\/media\//);
     assert.match(imageReady.content.variantImageUrl, /^\/api\/single-player-games\/media\//);
+    assert.match(imageReady.content.completeImageUrl, /^\/api\/single-player-games\/media\//);
+    assert.match(imageReady.content.missingImageUrl, /^\/api\/single-player-games\/media\//);
     assert.notEqual(imageReady.content.variantImageUrl, imageReady.content.imageUrl);
-    assert.match(imageReady.content.rounds[2].beforeImageUrl, /^\/api\/single-player-games\/media\//);
-    assert.match(imageReady.content.rounds[2].afterImageUrl, /^\/api\/single-player-games\/media\//);
-    assert.ok(imageReady.content.altText.includes('绿色圆形盒子'), 'image content must expose generated alt text');
+    assert.equal(imageReady.content.rounds.length, 1, 'image detective must contain one finished-on-submit round');
+    assert.match(imageReady.content.rounds[0].beforeImageUrl, /^\/api\/single-player-games\/media\//);
+    assert.match(imageReady.content.rounds[0].afterImageUrl, /^\/api\/single-player-games\/media\//);
+    assert.equal(imageReady.content.rounds[0].options.length, 3, 'image detective must expose three distinct candidate elements');
+    assert.equal(imageReady.content.candidateElements.length, 3, 'age 6-8 must expose three candidate element cards');
+    assert.equal(new Set(imageReady.content.candidateElements.map((item) => item.category)).size, 3, 'candidate categories must be visibly distinct');
+    assert.ok(imageReady.content.rounds[0].options.every((item) => item.description.includes(' · ')), 'each candidate must explain its category, purpose, and position');
+    assert.ok(imageReady.content.altText.includes('孩子'), 'image content must expose generated alt text');
     assertNoAnswerSpec(imageReady.content);
     const mediaResponse = await fetch(baseUrl + imageReady.content.imageUrl);
     assert.equal(mediaResponse.status, 200, 'generated image must use the dedicated media endpoint');
     assert.equal(mediaResponse.headers.get('content-type'), 'image/png');
+    const imageSubmission = await request(baseUrl, `/api/single-player-games/instances/${imageCreated.instanceId}/rounds/r1/submit`, {
+      method: 'POST', token: alice.accessToken,
+      body: { requestId: randomUUID(), action: { selectedIds: ['r1-basket'] } },
+    });
+    assert.equal(imageSubmission.status, 200);
+    assert.equal(imageSubmission.payload.correct, true);
+    assert.equal(imageSubmission.payload.currentRound, 1);
+    assert.equal(imageSubmission.payload.allRoundsComplete, true, 'one image submission must finish the game flow');
+    const imageFinish = await request(baseUrl, `/api/single-player-games/instances/${imageCreated.instanceId}/finish`, {
+      method: 'POST', token: alice.accessToken,
+      body: { requestId: randomUUID(), discovery: '我先比较左右两张图，再找出关键元素。' },
+    });
+    assert.equal(imageFinish.status, 200, 'one submitted image-detective answer must be eligible for finish');
+
+    const imageWrongCreated = await create(baseUrl, alice.accessToken, 'image-detective', 1);
+    const imageWrongReady = await waitInstance(baseUrl, alice.accessToken, imageWrongCreated.instanceId);
+    assert.equal(imageWrongReady.status, 'READY');
+    const imageWrongSubmission = await request(baseUrl, `/api/single-player-games/instances/${imageWrongCreated.instanceId}/rounds/r1/submit`, {
+      method: 'POST', token: alice.accessToken,
+      body: { requestId: randomUUID(), action: { selectedIds: ['r1-sticker'] } },
+    });
+    assert.equal(imageWrongSubmission.status, 200);
+    assert.equal(imageWrongSubmission.payload.correct, false, 'the comparison choice must remain distinguishable');
+    assert.equal(imageWrongSubmission.payload.currentRound, 1, 'an incorrect one-round image answer must still advance to reflection');
+    assert.equal(imageWrongSubmission.payload.allRoundsComplete, true);
+    const imageWrongFinish = await request(baseUrl, `/api/single-player-games/instances/${imageWrongCreated.instanceId}/finish`, {
+      method: 'POST', token: alice.accessToken,
+      body: { requestId: randomUUID(), discovery: '下次我会先看两张图中最影响目标判断的物品。' },
+    });
+    assert.equal(imageWrongFinish.status, 200, 'an incorrect image answer must still be eligible for its reflection summary');
 
     await stopApi(apiProcess);
     apiProcess = null;

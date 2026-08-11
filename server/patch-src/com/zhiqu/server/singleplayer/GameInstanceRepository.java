@@ -75,6 +75,15 @@ public class GameInstanceRepository {
                 """, status, failureCode, Timestamp.from(now), instanceId);
     }
 
+    int markInterruptedGenerations(Instant now) {
+        return jdbc.update("""
+                UPDATE single_player_game_instances
+                SET status = 'FAILED', public_content_json = NULL, answer_spec_json = NULL,
+                    failure_code = 'GENERATION_INTERRUPTED', updated_at = ?
+                WHERE status = 'GENERATING'
+                """, Timestamp.from(now));
+    }
+
     Optional<SubmissionRow> findSubmission(String instanceId, String roundId, String requestId) {
         return jdbc.query("""
                 SELECT id, instance_id, round_id, request_id, action_json, evaluation_json, created_at
@@ -121,12 +130,12 @@ public class GameInstanceRepository {
                 """, expectedCurrentRound + 1, Timestamp.from(now), instanceId, expectedCurrentRound);
     }
 
-    int markCompleted(String instanceId, String requestId, Instant now) {
+    int markCompleted(String instanceId, String requestId, int requiredRounds, Instant now) {
         return jdbc.update("""
                 UPDATE single_player_game_instances
                 SET status = 'COMPLETED', finish_request_id = ?, updated_at = ?
-                WHERE id = ? AND status = 'READY' AND current_round = 3
-                """, requestId, Timestamp.from(now), instanceId);
+                WHERE id = ? AND status = 'READY' AND current_round = ?
+                """, requestId, Timestamp.from(now), instanceId, requiredRounds);
     }
 
     void storeFinishResult(String instanceId, String finishJson, Instant now) {

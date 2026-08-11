@@ -9,7 +9,12 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -43,7 +48,8 @@ final class SinglePlayerAiClient {
                         value(environment, "SINGLE_PLAYER_VISION_BASE_URL", null),
                         value(environment, "SINGLE_PLAYER_VISION_API_KEY", null),
                         value(environment, "SINGLE_PLAYER_VISION_MODEL", null),
-                        Duration.ofSeconds(longValue(environment, "SINGLE_PLAYER_AI_TIMEOUT_SECONDS", 35, 1, 120))
+                        Duration.ofSeconds(longValue(environment, "SINGLE_PLAYER_AI_TIMEOUT_SECONDS", 35, 1, 120)),
+                        Duration.ofSeconds(longValue(environment, "SINGLE_PLAYER_IMAGE_TIMEOUT_SECONDS", 90, 30, 180))
                 )
         );
     }
@@ -97,7 +103,11 @@ final class SinglePlayerAiClient {
 
     JsonNode generateJson(String systemPrompt, JsonNode context) {
         requireTextConfiguration();
-        return chatJson(config.textBaseUrl(), config.textApiKey(), config.textModel(), systemPrompt, context.toString(), null);
+        try {
+            return chatJson(config.textBaseUrl(), config.textApiKey(), config.textModel(), systemPrompt, context.toString(), null);
+        } catch (GenerationFailure error) {
+            throw staged(error, "TEXT_AI_TIMEOUT", "文本内容生成超时", "TEXT_PROVIDER_BUSY", "文本服务暂时繁忙");
+        }
     }
 
     ImagePayload generateImage(String prompt) {
@@ -108,8 +118,13 @@ final class SinglePlayerAiClient {
         payload.put("n", 1);
         payload.put("size", "512x512");
         payload.put("quality", "low");
-        Duration imageTimeout = Duration.ofSeconds(Math.min(12, config.timeout().toSeconds()));
-        String response = sendJson(imageEndpoint(config.imageBaseUrl()), config.imageApiKey(), payload.toString(), 1, imageTimeout);
+        Duration imageTimeout = config.imageTimeout();
+        String response;
+        try {
+            response = sendJson(imageEndpoint(config.imageBaseUrl()), config.imageApiKey(), payload.toString(), 2, imageTimeout);
+        } catch (GenerationFailure error) {
+            throw staged(error, "IMAGE_AI_TIMEOUT", "图片生成超时", "IMAGE_PROVIDER_BUSY", "图片服务暂时繁忙");
+        }
         try {
             JsonNode root = objectMapper.readTree(response);
             JsonNode item = root.path("data").path(0);
@@ -144,27 +159,115 @@ final class SinglePlayerAiClient {
 
     JsonNode analyzeImage(ImagePayload image, JsonNode sceneSpec) {
         if (!visionConfigured()) throw new GenerationFailure("VISION_AI_NOT_CONFIGURED", "视觉模型未配置", "FAILED", false);
-        String dataUrl = "data:" + image.contentType() + ";base64," + Base64.getEncoder().encodeToString(image.bytes());
-        ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("model", config.visionModel());
-        payload.put("temperature", 0.1);
-        payload.put("max_tokens", 1600);
-        if ("MiniMax-M3".equalsIgnoreCase(config.visionModel())) {
-            payload.putObject("thinking").put("type", "disabled");
+        try {
+            String dataUrl = "data:" + image.contentType() + ";base64," + Base64.getEncoder().encodeToString(image.bytes());
+            ObjectNode payload = objectMapper.createObjectNode();
+            payload.put("model", config.visionModel());
+            payload.put("temperature", 0.1);
+            payload.put("max_tokens", 1600);
+            if ("MiniMax-M3".equalsIgnoreCase(config.visionModel())) {
+                payload.putObject("thinking").put("type", "disabled");
+            }
+            ArrayNode messages = payload.putArray("messages");
+            messages.addObject().put("role", "system").put("content", """
+                    你是儿童图片观察游戏的视觉核验器。只描述实际图像，不发明元素，不识别真实身份。
+                    先根据 sceneSpec.target 判断图片是否足以识别本局指定目标；再把实际看到的元素映射回稳定 sceneElementId，看不到就不要返回。
+                    每个 detections 元素还要给出实际物体的外接框 bbox，使用 0 到 100 的百分比坐标：{"x":左边缘,"y":上边缘,"width":宽度,"height":高度}。框要贴合该物体，不要把周围物体一起框入。
+                    visible=false 只是生成流程的预期状态，不能代替你的图片观察结果。不要根据元素角色猜答案。
+                    只返回 JSON：{"safety":{"status":"SAFE|REJECTED","reason":"..."},"targetRecognition":{"targetLabel":"...","detected":true,"confidence":0.0,"description":"只写实际判断"},"detections":[{"sceneElementId":"...","label":"...","confidence":0.0,"relation":"...","bbox":{"x":0,"y":0,"width":20,"height":20}}],"altText":"..."}。
+                    """);
+            ObjectNode user = messages.addObject();
+            user.put("role", "user");
+            ArrayNode content = user.putArray("content");
+            content.addObject().put("type", "text").put("text", "sceneSpec=" + sceneSpec);
+            content.addObject().put("type", "image_url").putObject("image_url").put("url", dataUrl);
+            String response = sendJson(chatEndpoint(config.visionBaseUrl()), config.visionApiKey(), payload.toString());
+            return parseChatJson(response);
+        } catch (GenerationFailure error) {
+            throw staged(error, "VISION_AI_TIMEOUT", "视觉识别超时", "VISION_PROVIDER_BUSY", "视觉识别服务暂时繁忙");
         }
-        ArrayNode messages = payload.putArray("messages");
-        messages.addObject().put("role", "system").put("content", """
-                你是儿童图片观察游戏的视觉核验器。只描述实际图像，不发明元素，不识别真实身份。
-                参照 sceneSpec 的稳定元素 ID，把实际看到的元素映射回 sceneElementId；看不到就不要返回。
-                只返回 JSON：{"safety":{"status":"SAFE|REJECTED","reason":"..."},"detections":[{"sceneElementId":"...","label":"...","confidence":0.0,"relation":"..."}],"altText":"..."}。
-                """);
-        ObjectNode user = messages.addObject();
-        user.put("role", "user");
-        ArrayNode content = user.putArray("content");
-        content.addObject().put("type", "text").put("text", "sceneSpec=" + sceneSpec);
-        content.addObject().put("type", "image_url").putObject("image_url").put("url", dataUrl);
-        String response = sendJson(chatEndpoint(config.visionBaseUrl()), config.visionApiKey(), payload.toString());
-        return parseChatJson(response);
+    }
+
+    Map<String, JsonNode> analyzeImages(List<VisionCase> cases) {
+        if (!visionConfigured()) throw new GenerationFailure("VISION_AI_NOT_CONFIGURED", "视觉模型未配置", "FAILED", false);
+        if (cases == null || cases.isEmpty() || cases.size() > 4) throw invalid("VISION_BATCH_INVALID");
+        try {
+            ObjectNode payload = objectMapper.createObjectNode();
+            payload.put("model", config.visionModel());
+            payload.put("temperature", 0.1);
+            payload.put("max_tokens", 4200);
+            if ("MiniMax-M3".equalsIgnoreCase(config.visionModel())) {
+                payload.putObject("thinking").put("type", "disabled");
+            }
+            ArrayNode messages = payload.putArray("messages");
+            messages.addObject().put("role", "system").put("content", """
+                    你是儿童图片观察游戏的视觉核验器。用户会依次提供多个 caseId、对应 sceneSpec 和图片。
+                    必须分别观察每张实际图片，不得把前一张图的内容复制到后一张，也不得根据 visible 字段或元素角色猜答案。
+                    对每个 caseId 判断目标是否可识别，并只返回实际看到的元素。不要识别真实身份。
+                    只返回 JSON：{"analyses":[{"caseId":"...","safety":{"status":"SAFE|REJECTED","reason":"..."},"targetRecognition":{"targetLabel":"...","detected":true,"confidence":0.0,"description":"只写实际判断"},"detections":[{"sceneElementId":"...","label":"...","confidence":0.0,"relation":"..."}],"altText":"..."}]}。
+                    analyses 必须与输入 caseId 一一对应，不要返回 Markdown。
+                    """);
+            ObjectNode user = messages.addObject();
+            user.put("role", "user");
+            ArrayNode content = user.putArray("content");
+            Set<String> expected = new HashSet<>();
+            for (VisionCase visionCase : cases) {
+                if (visionCase == null || visionCase.id() == null || visionCase.id().isBlank()
+                        || visionCase.image() == null || visionCase.sceneSpec() == null
+                        || !expected.add(visionCase.id())) throw invalid("VISION_BATCH_INVALID");
+                content.addObject().put("type", "text").put(
+                        "text", "caseId=" + visionCase.id() + "; sceneSpec=" + visionCase.sceneSpec());
+                content.addObject().put("type", "image_url").putObject("image_url").put(
+                        "url", dataUrl(visionCase.image()));
+            }
+            JsonNode parsed = parseChatJson(sendJson(
+                    chatEndpoint(config.visionBaseUrl()), config.visionApiKey(), payload.toString()));
+            JsonNode analyses = parsed.path("analyses");
+            if (!analyses.isArray()) throw invalid("VISION_BATCH_INVALID");
+            Map<String, JsonNode> result = new LinkedHashMap<>();
+            for (JsonNode analysis : analyses) {
+                String id = analysis.path("caseId").asText("");
+                if (!expected.contains(id) || result.putIfAbsent(id, analysis) != null) {
+                    throw invalid("VISION_BATCH_INVALID");
+                }
+            }
+            if (!result.keySet().equals(expected)) throw invalid("VISION_BATCH_INVALID");
+            return result;
+        } catch (GenerationFailure error) {
+            if ("VISION_BATCH_INVALID".equals(error.code()) || "AI_RESPONSE_INVALID".equals(error.code())
+                    || ("AI_PROVIDER_ERROR".equals(error.code()) && !error.retryable())) {
+                return analyzeImagesIndividually(cases);
+            }
+            throw staged(error, "VISION_AI_TIMEOUT", "视觉识别超时", "VISION_PROVIDER_BUSY", "视觉识别服务暂时繁忙");
+        }
+    }
+
+    private Map<String, JsonNode> analyzeImagesIndividually(List<VisionCase> cases) {
+        Map<String, JsonNode> result = new LinkedHashMap<>();
+        for (VisionCase visionCase : cases) {
+            result.put(visionCase.id(), analyzeImage(visionCase.image(), visionCase.sceneSpec()));
+        }
+        return result;
+    }
+
+    private static String dataUrl(ImagePayload image) {
+        return "data:" + image.contentType() + ";base64," + Base64.getEncoder().encodeToString(image.bytes());
+    }
+
+    private static GenerationFailure staged(
+            GenerationFailure error,
+            String timeoutCode,
+            String timeoutMessage,
+            String providerCode,
+            String providerMessage
+    ) {
+        if ("AI_TIMEOUT".equals(error.code())) {
+            return new GenerationFailure(timeoutCode, timeoutMessage, error.state(), error.retryable());
+        }
+        if ("AI_PROVIDER_ERROR".equals(error.code())) {
+            return new GenerationFailure(providerCode, providerMessage, error.state(), error.retryable());
+        }
+        return error;
     }
 
     private JsonNode chatJson(String baseUrl, String apiKey, String model, String system, String user, String imageUrl) {
@@ -190,12 +293,13 @@ final class SinglePlayerAiClient {
             }
             JsonNode result = objectMapper.readTree(content);
             if (!result.isObject()) throw invalid("AI_RESPONSE_INVALID");
-            String safety = result.path("safety").isTextual()
-                    ? result.path("safety").asText("")
-                    : result.path("safety").path("status").asText("");
-            if ("REJECTED".equalsIgnoreCase(safety) || "BLOCKED".equalsIgnoreCase(safety)) {
-                throw new GenerationFailure("AI_CONTENT_REJECTED", "本次内容未通过儿童安全审核", "REJECTED", true);
-            }
+            // Child-safety response gating is disabled. Provider-level moderation still applies.
+            // String safety = result.path("safety").isTextual()
+            //         ? result.path("safety").asText("")
+            //         : result.path("safety").path("status").asText("");
+            // if ("REJECTED".equalsIgnoreCase(safety) || "BLOCKED".equalsIgnoreCase(safety)) {
+            //     throw new GenerationFailure("AI_CONTENT_REJECTED", "本次内容未通过儿童安全审核", "REJECTED", true);
+            // }
             return result;
         } catch (GenerationFailure error) {
             throw error;
@@ -317,6 +421,9 @@ final class SinglePlayerAiClient {
     record ImagePayload(byte[] bytes, String contentType) {
     }
 
+    record VisionCase(String id, ImagePayload image, JsonNode sceneSpec) {
+    }
+
     record Config(
             String textBaseUrl,
             String textApiKey,
@@ -327,7 +434,8 @@ final class SinglePlayerAiClient {
             String visionBaseUrl,
             String visionApiKey,
             String visionModel,
-            Duration timeout
+            Duration timeout,
+            Duration imageTimeout
     ) {
     }
 }

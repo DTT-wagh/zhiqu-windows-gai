@@ -17,9 +17,9 @@
       title: '图片侦探',
       subject: '美术 · 观察 · 空间关系',
       accent: 'green',
-      description: '比较图片规格、视觉模型看到的元素和自己的观察。',
-      learningGoal: '用主体、形状、位置和关系证据核对 AI 的识别。',
-      estimatedMinutes: 7,
+      description: '左右比较同一张完整图和缺失图，找出最能帮助 AI 识别目标的关键元素。',
+      learningGoal: '通过一处真实删除实验，观察 AI 如何依赖物体、用途和场景关系识别目标。',
+      estimatedMinutes: 2,
       levelNo: 1
     },
     'sound-conductor': {

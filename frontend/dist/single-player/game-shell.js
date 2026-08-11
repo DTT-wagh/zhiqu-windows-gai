@@ -112,6 +112,13 @@
     return 'zhiqu.single-player.finish.' + instanceId;
   }
 
+  function totalRoundCount() {
+    if (state.content && Array.isArray(state.content.rounds) && state.content.rounds.length) {
+      return state.content.rounds.length;
+    }
+    return gameCode === 'image-detective' ? 1 : 3;
+  }
+
   function stopRequests() {
     if (state.abortController) state.abortController.abort();
     state.abortController = null;
@@ -143,8 +150,9 @@
     heading.appendChild(detail);
     var progress = document.createElement('div');
     progress.className = 'sp-progress-label';
+    var roundCount = totalRoundCount();
     progress.textContent = machine.state === STATES.ROUND_ACTIVE || machine.state === STATES.EVALUATING || machine.state === STATES.FEEDBACK
-      ? Math.min(3, (state.instance ? state.instance.currentRound : 0) + 1) + ' / 3'
+      ? Math.min(roundCount, (state.instance ? state.instance.currentRound : 0) + 1) + ' / ' + roundCount
       : machine.state === STATES.GENERATING ? '生成'
         : machine.state === STATES.DEMO ? '示范'
           : machine.state === STATES.RESULT ? '完成'
@@ -194,7 +202,9 @@
     var title = document.createElement('h1');
     title.textContent = game.title;
     var description = document.createElement('p');
-    description.textContent = game.description + ' 本局包含一次示范、三轮挑战和一次结算。';
+    description.textContent = gameCode === 'image-detective'
+      ? game.description + ' 一局只需左右对照、选择一个关键元素，再查看总结。'
+      : game.description + ' 本局包含一次示范、三轮挑战和一次结算。';
     head.appendChild(kicker);
     head.appendChild(title);
     head.appendChild(description);
@@ -202,9 +212,10 @@
 
     var loop = document.createElement('div');
     loop.className = 'sp-loop';
-    [
-      ['01', '看 AI 提取'], ['02', '和自己比'], ['03', '改一个信息']
-    ].forEach(function (item) {
+    var loopItems = gameCode === 'image-detective'
+      ? [['01', '左右找不同'], ['02', '选关键元素'], ['03', '查看总结']]
+      : [['01', '看 AI 提取'], ['02', '和自己比'], ['03', '改一个信息']];
+    loopItems.forEach(function (item) {
       var step = document.createElement('span');
       var number = document.createElement('b');
       number.textContent = item[0];
@@ -285,7 +296,7 @@
     title.textContent = '正在生成这一局';
     var copy = document.createElement('p');
     copy.textContent = gameCode === 'image-detective'
-      ? '正在生成场景、图片，并让视觉模型重新核对画面。'
+      ? '正在生成完整图，从同一张图删除元素，并让视觉模型核对每次识别。'
       : gameCode === 'route-and-conditions'
         ? '正在生成抽象图，随后由路线程序检查每个数字和条件。'
         : '正在根据本局目标和年龄段创建新的观察材料。';
@@ -335,7 +346,7 @@
 
   function currentRound() {
     return state.content && state.content.rounds
-      ? state.content.rounds[Math.min(2, state.instance.currentRound)]
+      ? state.content.rounds[Math.min(totalRoundCount() - 1, state.instance.currentRound)]
       : null;
   }
 
@@ -343,7 +354,12 @@
     var round = currentRound();
     if (!round) return fail({ code: 'ROUND_CONTENT_MISSING', message: '本轮内容不可用' });
     main.classList.add('sp-stage');
-    stageHeader(main, '第 ' + (state.instance.currentRound + 1) + ' 轮', round.title || '观察并核对', round.prompt);
+    stageHeader(
+      main,
+      gameCode === 'image-detective' ? '唯一关卡' : '第 ' + (state.instance.currentRound + 1) + ' 轮',
+      round.title || '观察并核对',
+      round.prompt
+    );
     var workspace = document.createElement('div');
     workspace.className = 'sp-workspace';
     var module = global.ZhiquSinglePlayerGames[gameCode];
@@ -354,13 +370,15 @@
     var submit = document.createElement('button');
     submit.type = 'button';
     submit.className = 'sp-primary';
-    submit.textContent = '核对我的观察';
+    submit.textContent = gameCode === 'image-detective' ? '提交答案并查看总结' : '核对我的观察';
     submit.disabled = state.selected.size === 0;
     submit.addEventListener('click', function () { submitRound(false); });
     actions.appendChild(submit);
     var note = document.createElement('span');
     note.className = 'sp-status-note';
-    note.textContent = state.selected.size ? '已选择 ' + state.selected.size + ' 项' : '先选择你观察到的证据或判断';
+    note.textContent = state.selected.size
+      ? (gameCode === 'image-detective' ? '已选择一个答案' : '已选择 ' + state.selected.size + ' 项')
+      : (gameCode === 'image-detective' ? '先选择一个元素' : '先选择你观察到的证据或判断');
     actions.appendChild(note);
     main.appendChild(actions);
   }
@@ -392,7 +410,10 @@
     }
     button.addEventListener('click', function () {
       if (state.selected.has(option.id)) state.selected.delete(option.id);
-      else state.selected.add(option.id);
+      else {
+        if (gameCode === 'image-detective') state.selected.clear();
+        state.selected.add(option.id);
+      }
       render();
     });
     return button;
@@ -405,7 +426,11 @@
     var loader = document.createElement('div');
     loader.className = 'sp-loader';
     var title = document.createElement('h1');
-    title.textContent = gameCode === 'route-and-conditions' ? '程序正在核对路线' : '正在比较这次观察';
+    title.textContent = gameCode === 'route-and-conditions'
+      ? '程序正在核对路线'
+      : gameCode === 'image-detective'
+        ? '正在核对这次识别'
+        : '正在比较这次观察';
     var copy = document.createElement('p');
     copy.textContent = '只根据本局生成的信息和你刚才的操作判断。';
     wrap.appendChild(loader);
@@ -435,7 +460,9 @@
     feedback.appendChild(heading);
     feedback.appendChild(copy);
     main.appendChild(feedback);
-    if (evaluation.correct && evaluation.comparison) main.appendChild(comparisonView(evaluation.comparison));
+    if ((evaluation.correct || gameCode === 'image-detective') && evaluation.comparison) {
+      main.appendChild(comparisonView(evaluation.comparison));
+    }
     var actions = document.createElement('div');
     actions.className = 'sp-actions';
     var next = document.createElement('button');
@@ -484,7 +511,25 @@
 
   function renderResult(main) {
     main.classList.add('sp-stage');
-    stageHeader(main, '三轮观察完成', '我发现了什么', '结算记录的是观察和证据，不是内容好不好看。');
+    stageHeader(
+      main,
+      gameCode === 'image-detective' ? '本局结束' : '三轮观察完成',
+      gameCode === 'image-detective' ? '总结与反思' : '我发现了什么',
+      gameCode === 'image-detective'
+        ? '结论来自同一张图的真实删除实验，请看看 AI 为什么依赖这个线索。'
+        : '结算记录的是观察和证据，不是内容好不好看。'
+    );
+    var resultContainer = main;
+    if (gameCode === 'image-detective') {
+      var dialog = document.createElement('section');
+      dialog.className = 'sp-result-dialog';
+      dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-label', '图片侦探总结与反思');
+      dialog.tabIndex = -1;
+      resultContainer = dialog;
+      main.appendChild(dialog);
+      global.setTimeout(function () { dialog.focus(); }, 0);
+    }
     var result = state.content && state.content.result ? state.content.result : {};
     var band = document.createElement('section');
     band.className = 'sp-result-band';
@@ -494,16 +539,26 @@
     limitation.textContent = result.limitation || 'AI 只能根据当前信息判断，还有它不知道的部分。';
     band.appendChild(heading);
     band.appendChild(limitation);
-    main.appendChild(band);
+    resultContainer.appendChild(band);
 
     var summary = document.createElement('section');
     summary.className = 'sp-result-summary';
-    [
-      ['我观察到的证据', result.evidence || result.discovery || '我根据本局的原始信息完成了判断。'],
-      ['AI 提取正确的地方', result.aiCorrect || '本局已核对 AI 能从原始信息中识别的内容。'],
-      ['AI 漏掉或不确定的地方', result.uncertain || result.limitation || 'AI 还有未知或可能看错的部分。'],
-      ['改变一个信息后', result.change || result.discovery || '只改变一个信息，AI 的判断可能随之变化。']
-    ].forEach(function (item) {
+    var summaryItems = gameCode === 'image-detective'
+      ? [
+        ['完整图与缺失图', result.evidence || result.discovery || '我比较了两张来自同一原图的图片。'],
+        ['本次选择', state.evaluation && state.evaluation.correct
+          ? (state.evaluation.feedback || '你找到了关键元素。')
+          : (state.evaluation && state.evaluation.hint) || '这次选择没有命中关键元素，但本局已经给出真实对照。'],
+        ['AI 依赖的线索', result.aiCorrect || 'AI 对关键元素的判断发生了明显变化。'],
+        ['需要保持的判断', result.limitation || result.uncertain || '不同画面中的关键线索可能不同。']
+      ]
+      : [
+        ['我观察到的证据', result.evidence || result.discovery || '我根据本局的原始信息完成了判断。'],
+        ['AI 提取正确的地方', result.aiCorrect || '本局已核对 AI 能从原始信息中识别的内容。'],
+        ['AI 漏掉或不确定的地方', result.uncertain || result.limitation || 'AI 还有未知或可能看错的部分。'],
+        ['改变一个信息后', result.change || result.discovery || '只改变一个信息，AI 的判断可能随之变化。']
+      ];
+    summaryItems.forEach(function (item) {
       var row = document.createElement('div');
       var label = document.createElement('strong');
       var copy = document.createElement('p');
@@ -513,35 +568,37 @@
       row.appendChild(copy);
       summary.appendChild(row);
     });
-    main.appendChild(summary);
+    resultContainer.appendChild(summary);
 
     if (!state.finish) {
       var label = document.createElement('label');
       label.className = 'sp-workspace';
       var labelText = document.createElement('strong');
-      labelText.textContent = '我的一句发现（可选）';
+      labelText.textContent = gameCode === 'image-detective' ? '我的反思（可选）' : '我的一句发现（可选）';
       var input = document.createElement('textarea');
       input.className = 'sp-reflection';
       input.maxLength = 500;
-      input.placeholder = '可以写下 AI 漏掉了什么，或哪个信息改变了判断。不要填写姓名、学校或联系方式。';
+      input.placeholder = gameCode === 'image-detective'
+        ? '可以写下你先注意到什么，或 AI 为什么需要这个元素。不要填写姓名、学校或联系方式。'
+        : '可以写下 AI 漏掉了什么，或哪个信息改变了判断。不要填写姓名、学校或联系方式。';
       label.appendChild(labelText);
       label.appendChild(input);
-      main.appendChild(label);
+      resultContainer.appendChild(label);
       var actions = document.createElement('div');
       actions.className = 'sp-actions';
       var finish = document.createElement('button');
       finish.type = 'button';
       finish.className = 'sp-primary';
-      finish.textContent = state.settling ? '正在保存' : '保存进度并领取奖励';
+      finish.textContent = state.settling ? '正在保存' : gameCode === 'image-detective' ? '保存总结并结束' : '保存进度并领取奖励';
       finish.disabled = state.settling;
       finish.addEventListener('click', function () { finishGame(input.value); });
       actions.appendChild(finish);
-      main.appendChild(actions);
+      resultContainer.appendChild(actions);
       if (state.error) {
         var error = document.createElement('p');
         error.className = 'sp-error-code';
         error.textContent = state.error.message || '结算暂时没有保存，请重试。';
-        main.appendChild(error);
+        resultContainer.appendChild(error);
       }
       return;
     }
@@ -552,7 +609,7 @@
       ? '本游戏奖励：' + state.finish.reward.awardedXp + ' XP' + (state.finish.reward.capped ? '（今日奖励已达上限）' : '')
       : '本游戏进度已经保存。';
     reward.textContent = rewardText;
-    main.appendChild(reward);
+    resultContainer.appendChild(reward);
     var completedActions = document.createElement('div');
     completedActions.className = 'sp-actions';
     var again = document.createElement('button');
@@ -566,7 +623,7 @@
     lobby.href = '/community?section=games';
     lobby.textContent = '返回大厅';
     completedActions.appendChild(lobby);
-    main.appendChild(completedActions);
+    resultContainer.appendChild(completedActions);
   }
 
   function renderFailed(main) {
@@ -576,10 +633,22 @@
     var title = document.createElement('h1');
     title.textContent = '本局内容暂时生成失败';
     var copy = document.createElement('p');
-    copy.textContent = '没有使用固定题目代替这次 AI 内容。可以重新生成，或先返回大厅。';
+    var failureCode = state.error && state.error.code ? state.error.code : 'GENERATION_FAILED';
+    var failureMessages = {
+      TEXT_AI_TIMEOUT: '题目内容生成时间较长，请重新试一次。',
+      TEXT_PROVIDER_BUSY: '题目服务暂时繁忙，请稍后重新试一次。',
+      IMAGE_AI_TIMEOUT: '图片生成服务响应较慢，请稍后重新试一次。',
+      IMAGE_PROVIDER_BUSY: '图片生成服务暂时繁忙，自动重试后仍未成功。',
+      VISION_AI_TIMEOUT: '图片识别服务响应较慢，请重新试一次。',
+      VISION_PROVIDER_BUSY: '图片识别服务暂时繁忙，请稍后重新试一次。',
+      GENERATION_INTERRUPTED: '生成过程因服务重启中断，请重新试一次。',
+      UNAUTHORIZED: '登录状态已失效，请返回大厅重新登录。'
+    };
+    copy.textContent = failureMessages[failureCode]
+      || '没有使用固定题目代替这次 AI 内容。可以重新生成，或先返回大厅。';
     var code = document.createElement('p');
     code.className = 'sp-error-code';
-    code.textContent = state.error && state.error.code ? state.error.code : 'GENERATION_FAILED';
+    code.textContent = '错误编号：' + failureCode;
     var actions = document.createElement('div');
     actions.className = 'sp-actions';
     var retry = document.createElement('button');
@@ -643,6 +712,21 @@
       fail({ code: 'SINGLE_PLAYER_LEVEL_INVALID', message: '本游戏只有一个统一入口' });
       return;
     }
+    if (gameCode === 'image-detective' && instance.content
+        && (!Array.isArray(instance.content.candidateElements)
+          || instance.content.candidateElements.length !== 3
+          || !Array.isArray(instance.content.rounds)
+          || instance.content.rounds.length !== 1)) {
+      removeStorage(activeKey());
+      state.instance = null;
+      state.content = null;
+      state.finish = null;
+      state.error = null;
+      state.statusNote = '旧版图片关卡已更新';
+      machine.force(STATES.INTRO);
+      render();
+      return;
+    }
     state.instance = instance;
     if (instance && instance.instanceId) writeStorage(activeKey(), instance.instanceId);
     if (instance.status === 'GENERATING') {
@@ -666,8 +750,10 @@
       fail({ code: 'INSTANCE_STATE_INVALID', message: '本局状态不可用' });
       return;
     }
-    if (instance.currentRound >= 3) {
+    if (instance.currentRound >= totalRoundCount()) {
       machine.force(STATES.RESULT);
+    } else if (gameCode === 'image-detective') {
+      machine.force(STATES.ROUND_ACTIVE);
     } else if (instance.currentRound > 0 || readStorage(demoKey(instance.instanceId))) {
       machine.force(STATES.ROUND_ACTIVE);
     } else {
@@ -711,6 +797,12 @@
     }, activeController.signal).then(function (evaluation) {
       state.evaluation = evaluation;
       state.instance.currentRound = evaluation.currentRound;
+      if (gameCode === 'image-detective') {
+        machine.force(STATES.RESULT);
+        state.statusNote = '本局已经结束，可以查看总结与反思';
+        render();
+        return;
+      }
       machine.transition('EVALUATED');
       state.statusNote = evaluation.correct ? '本轮观察已核对' : '可以立即重试';
       render();

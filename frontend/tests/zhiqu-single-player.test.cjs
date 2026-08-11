@@ -49,10 +49,15 @@ assert.equal(dataContext.ZhiquSinglePlayerData.list.length, 4, 'four games must 
 for (const game of dataContext.ZhiquSinglePlayerData.list) {
   assert.equal(game.levelNo, 1, `${game.gameCode} must expose one unified entry`);
   assert.equal('levels' in game, false, `${game.gameCode} must not expose a level catalog`);
-  assert.ok(game.estimatedMinutes >= 5 && game.estimatedMinutes <= 8, `${game.gameCode} must fit one short session`);
+  if (game.gameCode === 'image-detective') {
+    assert.equal(game.estimatedMinutes, 2, 'image detective must be a concise one-round game');
+  } else {
+    assert.ok(game.estimatedMinutes >= 5 && game.estimatedMinutes <= 8, `${game.gameCode} must fit one short session`);
+  }
 }
 
 const apiSource = fs.readFileSync(path.join(dist, 'single-player', 'api.js'), 'utf8');
+assert.match(apiSource, /__ZHIQU_API_BASE_URL \|\| 'http:\/\/localhost:8080'/, 'single-player API must have a local backend fallback');
 const storage = new Map();
 const calls = [];
 const apiContext = {
@@ -115,9 +120,16 @@ const api = apiContext.ZhiquSinglePlayerApi;
   assert.match(css, /\.sp-primary, \.sp-secondary \{ width: 100%; min-height: 52px; \}/, 'phone actions must fill the available row');
   assert.match(css, /prefers-reduced-motion/, 'reduced motion must be supported');
   assert.match(shellSource, /本局内容暂时生成失败/, 'generation failure must be explicit');
+  assert.match(shellSource, /图片生成服务响应较慢/, 'image timeout must have a readable explanation');
+  assert.match(shellSource, /图片生成服务暂时繁忙/, 'image provider failures must have a readable explanation');
+  assert.match(shellSource, /生成过程因服务重启中断/, 'interrupted generation must have a readable explanation');
+  assert.match(shellSource, /旧版图片关卡已更新/, 'legacy image detective instances must return to the new intro');
   assert.match(shellSource, /重试生成/, 'generation failure must offer retry');
   assert.match(shellSource, /返回大厅/, 'generation failure must offer lobby return');
-  assert.match(shellSource, /我看懂了/, 'the demo must lead into the three-round flow with one clear action');
+  assert.match(shellSource, /我看懂了/, 'the shared demo flow must keep one clear action for the other games');
+  assert.match(shellSource, /candidateElements\.length !== 3/, 'legacy image detective instances must reset when they do not have three candidates');
+  assert.match(shellSource, /本局已经结束，可以查看总结与反思/, 'image detective must move to reflection immediately after one submission');
+  assert.match(shellSource, /提交答案并查看总结/, 'image detective must use a single finishing submission');
   assert.match(shellSource, /再玩一次/, 'the result must offer replay as the primary action');
   assert.doesNotMatch(shellSource, /选择关卡|12 关可选|下一关/, 'the single-entry flow must not expose level navigation');
   assert.doesNotMatch(shellSource, /answerSpec|correctOptionIds|acceptedOptionIds/, 'answer specifications must not exist in frontend runtime');
@@ -125,8 +137,18 @@ const api = apiContext.ZhiquSinglePlayerApi;
   const imageGame = fs.readFileSync(path.join(dist, 'single-player', 'image-detective.js'), 'utf8');
   assert.match(imageGame, /beforeImageUrl/, 'the image game must compare the original and one-variable variant');
   assert.match(imageGame, /afterImageUrl/, 'the image game must render the generated variant');
+  assert.match(imageGame, /哪个是 AI 识别的关键元素？/, 'image detective must ask for the verified key element directly');
+  assert.match(imageGame, /option\.description/, 'candidate cards must keep their scene relationship visible');
+  assert.doesNotMatch(imageGame, /round\.roundId === 'r2'/, 'image detective must not keep the old second-round flow');
+  assert.doesNotMatch(imageGame, /round\.roundId === 'r3'/, 'image detective must not keep the old third-round flow');
 
-  console.log(JSON.stringify({ result: 'ok', checks: 69, games: 4, entries: 4 }));
+  assert.match(css, /\.sp-detective-pair \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/, 'complete and missing images must stay side by side');
+
+  const soundGame = fs.readFileSync(path.join(dist, 'single-player', 'sound-conductor.js'), 'utf8');
+  assert.match(soundGame, /round\.roundId === 'r3'/, 'the sound game must render a dedicated comparison in round three');
+  assert.match(soundGame, /context\.content\.rounds\[1\]/, 'the sound comparison must include the unchanged source sequence');
+
+  console.log(JSON.stringify({ result: 'ok', checks: 72, games: 4, entries: 4 }));
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

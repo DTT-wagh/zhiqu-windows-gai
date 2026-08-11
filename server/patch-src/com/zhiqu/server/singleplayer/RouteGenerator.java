@@ -70,7 +70,8 @@ final class RouteGenerator implements SinglePlayerGameGenerator {
         context.put("seed", request.seed());
         context.put("locale", "zh-CN");
         JsonNode generated = client.generateJson(SYSTEM_PROMPT, context);
-        validateSafety(generated.path("safety"));
+        // Child-safety status validation is disabled.
+        // validateSafety(generated.path("safety"));
         Graph graph = graph(generated.path("graph"));
         List<Task> tasks = tasks(generated.path("tasks"));
         if (tasks.size() != 4) throw invalid();

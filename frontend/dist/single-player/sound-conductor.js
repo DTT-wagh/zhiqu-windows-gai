@@ -1,7 +1,7 @@
 (function (global) {
   'use strict';
   global.ZhiquSinglePlayerGames = global.ZhiquSinglePlayerGames || {};
-  var active = { context: null, nodes: [], timer: null, playing: false, button: null };
+  var active = { context: null, nodes: [], timer: null, playing: false, button: null, label: '本局' };
 
   function stop() {
     active.nodes.forEach(function (node) {
@@ -13,7 +13,7 @@
     active.playing = false;
     if (active.button) {
       active.button.textContent = '▶';
-      active.button.setAttribute('aria-label', '播放本局乐段');
+      active.button.setAttribute('aria-label', '播放' + active.label + '乐段');
     }
   }
 
@@ -28,7 +28,7 @@
     return 'triangle';
   }
 
-  function play(sequence, volume, button) {
+  function play(sequence, volume, button, label) {
     stop();
     var AudioContext = global.AudioContext || global.webkitAudioContext;
     if (!AudioContext) return;
@@ -56,12 +56,14 @@
     });
     active.playing = true;
     active.button = button;
+    active.label = label;
     button.textContent = 'Ⅱ';
-    button.setAttribute('aria-label', '暂停本局乐段');
+    button.setAttribute('aria-label', '暂停' + label + '乐段');
     active.timer = global.setTimeout(stop, Math.max(100, (cursor - active.context.currentTime) * 1000));
   }
 
-  function soundPanel(container, sequence) {
+  function soundPanel(container, sequence, panelLabel) {
+    var label = panelLabel || '本局';
     var section = document.createElement('section');
     section.className = 'sp-sound-panel';
     var controls = document.createElement('div');
@@ -70,12 +72,12 @@
     playButton.type = 'button';
     playButton.className = 'sp-icon-button';
     playButton.textContent = '▶';
-    playButton.setAttribute('aria-label', '播放本局乐段');
+    playButton.setAttribute('aria-label', '播放' + label + '乐段');
     var repeatButton = document.createElement('button');
     repeatButton.type = 'button';
     repeatButton.className = 'sp-icon-button';
     repeatButton.textContent = '↻';
-    repeatButton.setAttribute('aria-label', '从头重复本局乐段');
+    repeatButton.setAttribute('aria-label', '从头重复' + label + '乐段');
     var volumeLabel = document.createElement('label');
     volumeLabel.className = 'sp-volume';
     volumeLabel.textContent = '音量';
@@ -89,9 +91,9 @@
     volumeLabel.appendChild(volume);
     playButton.addEventListener('click', function () {
       if (active.playing) stop();
-      else play(sequence, Number(volume.value), playButton);
+      else play(sequence, Number(volume.value), playButton, label);
     });
-    repeatButton.addEventListener('click', function () { play(sequence, Number(volume.value), playButton); });
+    repeatButton.addEventListener('click', function () { play(sequence, Number(volume.value), playButton, label); });
     controls.appendChild(playButton);
     controls.appendChild(repeatButton);
     controls.appendChild(volumeLabel);
@@ -117,7 +119,7 @@
   }
 
   function renderDemo(container, demo) {
-    soundPanel(container, demo.sequence || {});
+    soundPanel(container, demo.sequence || {}, '本局');
     var feedback = document.createElement('section');
     feedback.className = 'sp-feedback';
     feedback.innerHTML = '<h2>示范发现</h2><p></p>';
@@ -126,7 +128,28 @@
   }
 
   function renderRound(container, round, context) {
-    soundPanel(container, round.sequence || {});
+    var previous = context.content && context.content.rounds && context.content.rounds[1];
+    if (round.roundId === 'r3' && previous && previous.sequence) {
+      var comparison = document.createElement('div');
+      comparison.className = 'sp-sound-comparison';
+      var before = document.createElement('div');
+      before.className = 'sp-sound-case';
+      var beforeHeading = document.createElement('h2');
+      beforeHeading.textContent = '改变前';
+      before.appendChild(beforeHeading);
+      soundPanel(before, previous.sequence, '改变前');
+      var after = document.createElement('div');
+      after.className = 'sp-sound-case';
+      var afterHeading = document.createElement('h2');
+      afterHeading.textContent = '改变后';
+      after.appendChild(afterHeading);
+      soundPanel(after, round.sequence || {}, '改变后');
+      comparison.appendChild(before);
+      comparison.appendChild(after);
+      container.appendChild(comparison);
+    } else {
+      soundPanel(container, round.sequence || {}, '本局');
+    }
     context.renderOptions(container, round.options || []);
   }
 

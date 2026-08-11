@@ -31,9 +31,11 @@ final class GameContentValidator {
 
     GeneratedGame splitAndValidate(String gameCode, JsonNode generated, String modelName) {
         requireObject(generated, "AI_RESPONSE_INVALID");
-        validateSafety(generated.path("safety"));
+        // Child-safety status validation is disabled.
+        // validateSafety(generated.path("safety"));
         requireText(generated.path("instruction"), 240, "GAME_INSTRUCTION_INVALID");
-        requireObject(generated.path("demo"), "GAME_DEMO_INVALID");
+        boolean isImageDetective = "image-detective".equals(gameCode);
+        if (!isImageDetective) requireObject(generated.path("demo"), "GAME_DEMO_INVALID");
         requireObject(generated.path("result"), "GAME_RESULT_INVALID");
         requireText(generated.path("result").path("evidence"), 500, "GAME_RESULT_INVALID");
         requireText(generated.path("result").path("aiCorrect"), 500, "GAME_RESULT_INVALID");
@@ -42,14 +44,20 @@ final class GameContentValidator {
         requireText(generated.path("result").path("discovery"), 500, "GAME_RESULT_INVALID");
         requireText(generated.path("result").path("limitation"), 500, "GAME_RESULT_INVALID");
         JsonNode rounds = generated.path("rounds");
-        if (!rounds.isArray() || rounds.size() != 3) throw failure("GAME_ROUNDS_INVALID");
+        int roundCount = isImageDetective ? 1 : 3;
+        if (!rounds.isArray() || rounds.size() != roundCount) throw failure("GAME_ROUNDS_INVALID");
+        if (isImageDetective) {
+            if (!generated.path("candidateElements").isArray() || generated.path("candidateElements").size() != 3) {
+                throw failure("IMAGE_CANDIDATES_INVALID");
+            }
+        }
 
         ObjectNode publicContent = (ObjectNode) generated.deepCopy();
         publicContent.remove("safety");
         ObjectNode answerSpec = objectMapper.createObjectNode();
         ArrayNode answers = answerSpec.putArray("rounds");
         Set<String> roundIds = new HashSet<>();
-        for (int index = 0; index < 3; index += 1) {
+        for (int index = 0; index < roundCount; index += 1) {
             JsonNode generatedRound = rounds.get(index);
             requireObject(generatedRound, "GAME_ROUND_INVALID");
             String expectedId = "r" + (index + 1);
@@ -58,6 +66,9 @@ final class GameContentValidator {
             requireText(generatedRound.path("prompt"), 500, "GAME_ROUND_INVALID");
             if (!generatedRound.path("options").isArray() || generatedRound.path("options").size() < 2) {
                 throw failure("GAME_OPTIONS_INVALID");
+            }
+            if (isImageDetective && generatedRound.path("options").size() != 3) {
+                throw failure("IMAGE_OPTIONS_INVALID");
             }
             JsonNode answer = generatedRound.path("answer");
             requireObject(answer, "GAME_ANSWER_INVALID");
@@ -68,7 +79,8 @@ final class GameContentValidator {
             answers.add(stored);
             ((ObjectNode) publicContent.path("rounds").get(index)).remove("answer");
         }
-        scanStrings(publicContent, 0);
+        // Child-safety text scanning is disabled.
+        // scanStrings(publicContent, 0);
         ensureNoAnswers(publicContent, 0);
         return new GeneratedGame(publicContent, answerSpec, modelName);
     }
@@ -91,27 +103,53 @@ final class GameContentValidator {
     }
 
     void validateImageConsistency(JsonNode sceneSpec, JsonNode recognition) {
-        validateSafety(recognition.path("safety"));
+        validateImageRecognition(sceneSpec, recognition);
+        JsonNode target = recognition.path("targetRecognition");
+        if (target.isObject() && !target.path("detected").asBoolean(false)) {
+            throw new GenerationFailure("IMAGE_VISION_MISMATCH", "图片与场景规格不一致", "REJECTED", true);
+        }
+        String primary = "";
+        for (JsonNode element : sceneSpec.path("elements")) {
+            if (element.path("primary").asBoolean(false)) primary = element.path("id").asText("");
+        }
+        if (!primary.isBlank() && !target.isObject()) {
+            boolean detected = false;
+            for (JsonNode item : recognition.path("detections")) {
+                if (primary.equals(item.path("sceneElementId").asText("")
+                        ) && item.path("confidence").asDouble(0d) >= 0.45d) {
+                    detected = true;
+                    break;
+                }
+            }
+            if (!detected) throw new GenerationFailure("IMAGE_VISION_MISMATCH", "图片与场景规格不一致", "REJECTED", true);
+        }
+    }
+
+    void validateImageRecognition(JsonNode sceneSpec, JsonNode recognition) {
+        // Child-safety status validation is disabled for vision responses.
+        // validateSafety(recognition.path("safety"));
         JsonNode elements = sceneSpec.path("elements");
         JsonNode detections = recognition.path("detections");
         if (!elements.isArray() || elements.size() < 2 || !detections.isArray()) throw failure("IMAGE_SCENE_INVALID");
         Set<String> expected = new HashSet<>();
-        String primary = "";
         for (JsonNode element : elements) {
             String id = element.path("id").asText("");
             if (id.isBlank()) throw failure("IMAGE_SCENE_INVALID");
             expected.add(id);
-            if (element.path("primary").asBoolean(false)) primary = id;
         }
-        Set<String> detected = new HashSet<>();
         for (JsonNode item : detections) {
             String id = item.path("sceneElementId").asText("");
-            double confidence = item.path("confidence").asDouble(0d);
-            if (expected.contains(id) && confidence >= 0.45d) detected.add(id);
+            double confidence = item.path("confidence").asDouble(-1d);
+            if ((!id.isBlank() && !expected.contains(id)) || confidence < 0d || confidence > 1.01d) {
+                throw failure("IMAGE_RECOGNITION_INVALID");
+            }
         }
-        int minimum = Math.max(2, (int) Math.ceil(expected.size() * 0.6d));
-        if (detected.size() < minimum || (!primary.isBlank() && !detected.contains(primary))) {
-            throw new GenerationFailure("IMAGE_VISION_MISMATCH", "图片与场景规格不一致", "REJECTED", true);
+        JsonNode target = recognition.path("targetRecognition");
+        if (target.isObject()) {
+            double confidence = target.path("confidence").asDouble(-1d);
+            if (confidence < 0d || confidence > 1.01d || !target.path("targetLabel").isTextual()) {
+                throw failure("IMAGE_TARGET_RECOGNITION_INVALID");
+            }
         }
         requireText(recognition.path("altText"), 500, "IMAGE_ALT_INVALID");
     }

@@ -160,7 +160,26 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
 .sp-image-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .sp-generated-image { width: 100%; max-height: 470px; aspect-ratio: 1; object-fit: contain; border: 1px solid var(--sp-line); border-radius: 8px; background: #fff; }
 
+.sp-detective-compare { display: grid; gap: 10px; }
+.sp-detective-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sp-detective-pair .sp-image-figure { min-width: 0; }
+.sp-recognition-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.sp-recognition-pair > div { min-width: 0; padding: 10px 12px; border: 1px solid rgba(70, 85, 165, .2); background: rgba(255,255,255,.72); }
+.sp-recognition-pair strong { display: block; margin-bottom: 5px; font-size: 13px; }
+.sp-recognition-pair p { margin: 0; color: var(--sp-muted); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.sp-element-heading { color: var(--sp-muted); font-size: 13px; font-weight: 700; }
+.sp-element-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.sp-element-card { display: grid; grid-template-columns: 64px minmax(0, 22px); grid-template-rows: auto auto; gap: 3px 10px; align-items: center; min-height: 88px; padding: 10px; }
+.sp-element-card img { grid-row: 1 / span 2; width: 64px; height: 64px; object-fit: cover; border: 1px solid var(--sp-line); border-radius: 6px; background: var(--sp-soft); }
+.sp-element-card span { min-width: 0; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+.sp-element-card small { min-width: 0; color: var(--sp-muted); font-size: 12px; font-weight: 400; line-height: 1.35; overflow-wrap: anywhere; }
+.sp-element-card .sp-element-check { grid-column: 3; grid-row: 1 / span 2; }
+.sp-element-check { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid var(--sp-line); border-radius: 50%; color: transparent; font-size: 13px; }
+.sp-element-card[aria-pressed="true"] .sp-element-check { border-color: var(--sp-green); background: var(--sp-green); color: #fff; }
 .sp-sound-controls { display: grid; grid-template-columns: 48px 48px minmax(100px, 1fr); gap: 8px; align-items: center; }
+.sp-sound-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.sp-sound-case { display: grid; min-width: 0; gap: 8px; }
+.sp-sound-case > h2 { margin: 0; font-size: 15px; }
 .sp-icon-button { width: 48px; padding: 0; border: 1px solid var(--sp-line); background: #fff; color: var(--sp-ink); font-size: 20px; }
 .sp-volume { display: grid; gap: 3px; color: var(--sp-muted); font-size: 12px; }
 .sp-volume input { width: 100%; }
@@ -183,6 +202,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
 .sp-result-band { display: grid; gap: 14px; padding: 18px; border: 1px solid #b7c9bd; border-radius: 8px; background: var(--sp-green-soft); }
 .sp-result-band h2 { margin: 0; font-size: 20px; }
 .sp-result-band p { margin: 0; line-height: 1.7; }
+.sp-result-dialog { display: grid; width: min(100%, 820px); gap: 14px; margin-inline: auto; padding: 18px; border: 1px solid #b7c9bd; border-radius: 8px; background: var(--sp-paper); box-shadow: 0 14px 32px rgba(23, 33, 29, .14); animation: spResultEnter .2s ease-out; }
 .sp-result-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid var(--sp-line); background: var(--sp-paper); }
 .sp-result-summary > div { min-width: 0; padding: 14px 16px; border-bottom: 1px solid var(--sp-line); }
 .sp-result-summary > div:nth-child(odd) { border-right: 1px solid var(--sp-line); }
@@ -202,6 +222,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
 .sp-visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(1px, 1px, 1px, 1px); white-space: nowrap; }
 
 @keyframes spSpin { to { transform: rotate(360deg); } }
+@keyframes spResultEnter { from { opacity: 0; transform: translateY(8px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 @media (max-width: 760px) {
   .sp-main { padding: 18px 14px 36px; }
@@ -210,8 +231,11 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
   .sp-loop span { min-height: auto; }
   .sp-completion { align-items: flex-start; flex-direction: column; gap: 4px; }
   .sp-options { grid-template-columns: 1fr; }
+  .sp-sound-comparison { grid-template-columns: minmax(0, 1fr); }
   .sp-comparison { grid-template-columns: 1fr; }
   .sp-image-comparison { grid-template-columns: 1fr; }
+  .sp-detective-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .sp-recognition-pair { grid-template-columns: 1fr; }
   .sp-result-summary { grid-template-columns: 1fr; }
   .sp-result-summary > div, .sp-result-summary > div:nth-child(odd) { border-right: 0; border-bottom: 1px solid var(--sp-line); }
   .sp-result-summary > div:last-child { border-bottom: 0; }
@@ -283,6 +307,21 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
   .sp-stage { gap: 14px; }
   .sp-source, .sp-ai-view, .sp-feedback, .sp-sound-panel, .sp-map-panel { padding: 12px 14px; }
   .sp-option { min-height: 56px; padding: 11px 12px; }
+  .sp-element-card {
+    position: relative;
+    min-height: 160px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 72px auto auto;
+    justify-items: center;
+    gap: 8px;
+    padding: 10px 8px 12px;
+    text-align: center;
+  }
+  .sp-element-card img { grid-row: 1; width: 72px; height: 72px; }
+  .sp-element-card span { width: 100%; font-size: 13px; line-height: 1.45; }
+  .sp-element-card small { width: 100%; font-size: 11px; line-height: 1.35; }
+  .sp-element-card .sp-element-check { position: absolute; top: 8px; right: 8px; }
+  .sp-stage > .sp-actions { position: sticky; bottom: 0; z-index: 6; padding: 8px 0 max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--sp-line); background: rgba(247, 250, 248, .97); }
   .sp-map { min-height: 220px; }
   .sp-loading { min-height: calc(100dvh - 132px); }
 }
