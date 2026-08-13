@@ -88,6 +88,10 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
 
 .sp-loop span { min-height: 66px; padding: 12px 10px; background: var(--sp-paper); font-size: 13px; line-height: 1.45; }
 .sp-loop b { display: block; margin-bottom: 4px; color: var(--sp-indigo); font-size: 12px; }
+.sp-difficulty-flow span { position: relative; }
+.sp-difficulty-flow span[data-difficulty="基础"] { background: var(--sp-paper); }
+.sp-difficulty-flow span[data-difficulty="进阶"] { background: var(--sp-amber-soft); }
+.sp-difficulty-flow span[data-difficulty="综合"] { background: var(--sp-coral-soft); }
 
 .sp-completion {
   display: flex;
@@ -198,6 +202,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
 .sp-comparison > div { padding: 12px; border: 1px solid var(--sp-line); background: #fff; }
 .sp-comparison strong { display: block; margin-bottom: 5px; font-size: 13px; }
 .sp-comparison p { margin: 0; color: var(--sp-muted); line-height: 1.55; }
+.sp-comparison .sp-chips { margin-top: 8px; }
 
 .sp-result-band { display: grid; gap: 14px; padding: 18px; border: 1px solid #b7c9bd; border-radius: 8px; background: var(--sp-green-soft); }
 .sp-result-band h2 { margin: 0; font-size: 20px; }
@@ -228,6 +233,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
   .sp-main { padding: 18px 14px 36px; }
   .sp-intro h1, .sp-state-title { font-size: 24px; }
   .sp-loop { grid-template-columns: 1fr; }
+  .sp-loop.sp-difficulty-flow { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sp-loop span { min-height: auto; }
   .sp-completion { align-items: flex-start; flex-direction: column; gap: 4px; }
   .sp-options { grid-template-columns: 1fr; }

@@ -2,6 +2,7 @@
   const PRESENCE_RUNTIME_KEY = '__zqMagicFriendPresenceRuntimeV1';
   const PRESENCE_INTERVAL_MS = 25_000;
   const SESSION_KEY = 'zhiqu.auth.session.v1';
+  const RETURN_STATE_KEY = 'zhiqu.magic.return.v1';
   let accountRefreshPromise = null;
 
   const apiBase = () => String(globalThis.__ZHIQU_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '');
@@ -104,6 +105,7 @@
     const assetRoot = '/assets/figma-magic';
     const shell = document.createElement('div');
     shell.setAttribute('data-magic-reference-shell', 'true');
+    shell.classList.add('is-entering');
     shell.innerHTML = `
       <div class="magic-ref-stage">
         <img class="magic-ref-sign" src="/assets/assets/images/zhaopai.png" alt="共学社">
@@ -148,21 +150,37 @@
 
         <main class="magic-ref-main">
           <img class="magic-ref-main-card" src="${assetRoot}/main-card.png" alt="画里藏词：找出藏在图中的隐藏线索">
+          <button class="magic-ref-exit" type="button" data-action="exit" aria-label="退出大厅" title="返回">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+              <path d="M19 12H5"></path>
+              <path d="m12 19-7-7 7-7"></path>
+            </svg>
+          </button>
           <button class="magic-ref-start" type="button" data-action="start" aria-label="开始游戏">开始游戏</button>
+          <div class="magic-ref-feedback" data-magic-feedback role="alert" aria-live="polite" hidden></div>
         </main>
 
         <aside class="magic-ref-rooms" aria-label="房间列表">
           <img class="magic-ref-rooms-art" src="${assetRoot}/rooms-panel.png" alt="">
           <div class="magic-ref-room-list" aria-live="polite"></div>
-          <button class="magic-ref-create-hotspot" type="button" data-action="create" aria-label="创建房间">创建房间</button>
+          <button class="magic-ref-create-hotspot" type="button" data-action="create" aria-label="创建房间">
+            <span class="magic-ref-create-icon" aria-hidden="true">&#9733;</span>
+            <span class="magic-ref-create-label">创建房间</span>
+          </button>
         </aside>
       </div>`;
 
     const style = document.createElement('link');
-    style.rel = 'stylesheet';
-    style.href = '/magic-reference.css';
-    document.head.appendChild(style);
+    const referenceStylesheet = document.querySelector('link[href="/magic-reference.css"]');
+    if (!referenceStylesheet) {
+      style.rel = 'stylesheet';
+      style.href = '/magic-reference.css';
+      document.head.appendChild(style);
+    }
     root.appendChild(shell);
+    document.getElementById('zq-magic-route-prepaint')?.remove();
+    globalThis.__zqMagicEntryTransitionRuntimeV2?.complete?.();
+    const entryAnimationTimer = globalThis.setTimeout(() => shell.classList.remove('is-entering'), 760);
 
     const roomsPanel = shell.querySelector('.magic-ref-rooms');
     const roomList = shell.querySelector('.magic-ref-room-list');
@@ -174,7 +192,54 @@
     const profileAvatarFallback = shell.querySelector('.magic-ref-avatar-fallback');
     const profileXpBar = shell.querySelector('.magic-ref-xp-bar');
     const starTotal = shell.querySelector('.magic-ref-stars span');
-    const state = { rooms: [], error: '', loading: false, starting: false };
+    const feedback = shell.querySelector('[data-magic-feedback]');
+    const state = { rooms: [], error: '', loading: false, starting: false, exiting: false };
+    const syncFeedback = () => {
+      if (!feedback) return;
+      const message = String(state.error || '').trim();
+      feedback.textContent = message;
+      feedback.hidden = !message;
+    };
+
+    const readReturnState = () => {
+      try {
+        const value = JSON.parse(globalThis.sessionStorage?.getItem(RETURN_STATE_KEY) || 'null');
+        const isFresh = Number.isFinite(value?.createdAt) && Date.now() - value.createdAt < 15 * 60_000;
+        const isCommunityGames = typeof value?.url === 'string' && /^\/community(?:\?[^#]*)?$/.test(value.url);
+        const hasHistoryPosition = Number.isInteger(value?.historyLength) && value.historyLength > 0;
+        return isFresh && isCommunityGames && hasHistoryPosition ? value : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const exitLobby = () => {
+      if (state.exiting) return;
+      state.exiting = true;
+      const exitCover = document.createElement('div');
+      exitCover.className = 'magic-ref-exit-cover';
+      exitCover.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(exitCover);
+      shell.classList.add('is-exiting');
+      document.body?.setAttribute('data-zq-magic-exiting', '');
+
+      const returnState = readReturnState();
+      try {
+        globalThis.sessionStorage?.removeItem(RETURN_STATE_KEY);
+      } catch {}
+      const reduceMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      globalThis.setTimeout(() => {
+        try {
+          globalThis.screen?.orientation?.unlock?.();
+        } catch {}
+        const returnDelta = returnState ? returnState.historyLength - globalThis.history.length : 0;
+        if (returnState && returnDelta < 0 && returnDelta >= -20) {
+          globalThis.history.go(returnDelta);
+          return;
+        }
+        globalThis.location.replace(returnState?.url || '/community?section=games');
+      }, reduceMotion ? 100 : 420);
+    };
     const listedRooms = new Map();
     let accountLoadingPromise = null;
 
@@ -219,7 +284,8 @@
       return token ? { Accept: 'application/json', Authorization: `Bearer ${token}` } : { Accept: 'application/json' };
     };
 
-    const api = async (path, options = {}) => {
+    const api = async (path, options = {}, retryAfterRefresh = true) => {
+      const currentSession = session();
       const response = await globalThis.fetch(`${apiBase()}${path}`, {
         ...options,
         headers: { ...requestHeaders(), ...(options.headers || {}) },
@@ -227,7 +293,15 @@
       const raw = await response.text();
       let payload = null;
       try { payload = raw ? JSON.parse(raw) : null; } catch { payload = raw; }
-      if (!response.ok) throw new Error(payload?.message || payload?.error || '请求暂时未完成');
+      if (response.status === 401 && retryAfterRefresh) {
+        const nextSession = await refreshAccountSession(currentSession);
+        if (nextSession?.accessToken) return api(path, options, false);
+      }
+      if (!response.ok) {
+        const error = new Error(payload?.message || payload?.error || '请求暂时未完成');
+        error.status = response.status;
+        throw error;
+      }
       return payload;
     };
 
@@ -347,9 +421,11 @@
       try {
         const payload = await api('/api/community/game-listings?gameCode=MAGIC');
         state.error = '';
+        syncFeedback();
         renderRooms((Array.isArray(payload?.items) ? payload.items : []).filter(roomIsJoinable));
       } catch (error) {
         state.error = error.message || '房间列表暂时无法刷新';
+        syncFeedback();
         renderRooms([]);
       } finally {
         state.loading = false;
@@ -369,10 +445,16 @@
         });
         const joinedRoomId = joinedRoom?.roomId || room.roomId;
         if (!joinedRoomId) throw new Error('房间暂时无法加入');
-        globalThis.location.assign(`/magic/${encodeURIComponent(joinedRoomId)}`);
+        if (globalThis.__zqOpenMagicRoom) {
+          globalThis.__zqOpenMagicRoom(joinedRoomId);
+        } else {
+          globalThis.location.assign(`/magic/${encodeURIComponent(joinedRoomId)}`);
+        }
       } catch {
         button.disabled = false;
         button.textContent = '加入';
+        state.error = '房间暂时无法加入，请刷新后重试';
+        syncFeedback();
         refreshRooms();
       }
     };
@@ -386,12 +468,16 @@
       state.starting = true;
       startButton.disabled = true;
       startButton.setAttribute('aria-label', '正在开始游戏');
+      shell.classList.add('is-starting-game');
       state.error = '';
+      syncFeedback();
       try {
         let room = null;
         try {
           room = await api('/api/magic-game-rooms/active');
-        } catch {}
+        } catch (error) {
+          if (![404, 204].includes(Number(error?.status))) throw error;
+        }
         if (!room?.id) {
           const createId = requestId();
           room = await api('/api/magic-game-rooms', {
@@ -401,12 +487,18 @@
           });
         }
         if (!room?.id) throw new Error('暂时无法进入游戏，请稍后重试');
-        globalThis.location.assign(`/magic/${encodeURIComponent(room.id)}`);
+        if (globalThis.__zqOpenMagicRoom) {
+          globalThis.__zqOpenMagicRoom(room.id);
+        } else {
+          globalThis.location.assign(`/magic/${encodeURIComponent(room.id)}`);
+        }
       } catch (error) {
         state.starting = false;
         startButton.disabled = false;
         startButton.setAttribute('aria-label', '开始游戏');
+        shell.classList.remove('is-starting-game');
         state.error = error.message || '暂时无法进入游戏，请稍后重试';
+        syncFeedback();
       }
     };
 
@@ -439,35 +531,76 @@
       if (action === 'join') joinRoom(actionNode);
       if (action === 'settings') globalThis.location.assign('/settings');
       if (action === 'ranking') globalThis.location.assign('/rewards');
+      if (action === 'exit') exitLobby();
     });
 
     const cleanup = () => {
       if (globalThis.location.pathname !== '/magic') {
         shell.remove();
-        style.remove();
+        document.body?.removeAttribute('data-zq-magic-exiting');
+        document.body?.removeAttribute('data-zq-magic-lobby');
+        const exitCover = document.querySelector('.magic-ref-exit-cover');
+        if (exitCover) {
+          exitCover.classList.add('is-leaving');
+          globalThis.setTimeout(() => exitCover.remove(), 180);
+        }
+        if (!referenceStylesheet) style.remove();
         if (!globalThis.location.pathname.startsWith('/magic/')) {
           document.body?.removeAttribute('data-zq-magic-landscape');
-          document.body?.removeAttribute('data-zq-magic-lobby');
         }
         clearInterval(roomRefreshTimer);
         clearInterval(accountRefreshTimer);
         clearInterval(routeTimer);
+        globalThis.clearTimeout(entryAnimationTimer);
         globalThis.removeEventListener('focus', refreshOnFocus);
+        globalThis.removeEventListener('popstate', cleanup);
         document.removeEventListener('visibilitychange', refreshOnVisibility);
         globalThis.removeEventListener('storage', refreshOnStorage);
       }
     };
     const routeTimer = globalThis.setInterval(cleanup, 300);
+    globalThis.addEventListener('popstate', cleanup);
   };
 
-  const scheduleBoot = () => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(boot));
   if (document.readyState === 'loading') {
-    globalThis.addEventListener('DOMContentLoaded', scheduleBoot, { once: true });
+    globalThis.addEventListener('DOMContentLoaded', boot, { once: true });
   } else {
-    scheduleBoot();
+    boot();
   }
   globalThis.setInterval(() => {
     if (globalThis.location.pathname === '/magic') boot();
   }, 200);
+  const hideLegacyRoom = () => {
+    const id = 'zq-magic-room-reference-pending-style';
+    if (document.getElementById(id)) return;
+    const style = document.createElement('style');
+    style.id = id;
+    style.textContent = 'html[data-zq-magic-room-reference-pending] #root > *:not([data-magic-room-reference-shell]) { visibility: hidden !important; }';
+    document.head.appendChild(style);
+  };
+  const ensureRoomOverlay = () => {
+    const parts = globalThis.location.pathname.split('/').filter(Boolean);
+    const isRoomRoute = parts.length === 2 && parts[0] === 'magic';
+    if (!isRoomRoute) return;
+    hideLegacyRoom();
+    document.documentElement?.setAttribute('data-zq-magic-room-reference-pending', '');
+    document.body?.setAttribute('data-zq-magic-room-reference', '');
+    const currentRuntime = globalThis.__zqMagicRoomReferenceRuntimeV4;
+    if (currentRuntime) {
+      currentRuntime.ensure?.();
+      return;
+    }
+    if (document.querySelector('[data-zq-magic-room-reference-loader]')) return;
+    const script = document.createElement('script');
+    script.src = '/magic-room-reference.js';
+    script.dataset.zqMagicRoomReferenceLoader = 'true';
+    script.addEventListener('error', () => {
+      script.remove();
+      document.body?.removeAttribute('data-zq-magic-room-reference');
+      document.documentElement?.removeAttribute('data-zq-magic-room-reference-pending');
+    }, { once: true });
+    document.body.appendChild(script);
+  };
+  globalThis.setInterval(ensureRoomOverlay, 100);
   ensurePresenceRuntime();
 })();

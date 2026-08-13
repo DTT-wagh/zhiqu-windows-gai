@@ -9,8 +9,16 @@ const jarPath = path.resolve(process.env.ZHIQU_SERVER_JAR || generatedJarPath);
 const baselineJarPath = path.join(serverRoot, 'zhiqu-server.jar');
 const sourceRoot = path.join(__dirname, 'com', 'zhiqu', 'server', 'singleplayer');
 const securitySource = path.join(__dirname, 'com', 'zhiqu', 'server', 'config', 'SecurityConfig.java');
-const migrationSource = path.join(__dirname, 'db', 'migration', 'V43__create_single_player_games.sql');
-const migrationPath = 'BOOT-INF/classes/db/migration/V43__create_single_player_games.sql';
+const migrations = [
+  {
+    source: path.join(__dirname, 'db', 'migration', 'V43__create_single_player_games.sql'),
+    target: 'BOOT-INF/classes/db/migration/V43__create_single_player_games.sql',
+  },
+  {
+    source: path.join(__dirname, 'db', 'migration', 'V45__create_prompt_question_bank.sql'),
+    target: 'BOOT-INF/classes/db/migration/V45__create_prompt_question_bank.sql',
+  },
+];
 const classDirectory = 'BOOT-INF/classes/com/zhiqu/server/singleplayer';
 const securityClass = 'BOOT-INF/classes/com/zhiqu/server/config/SecurityConfig.class';
 const tempRoot = fs.mkdtempSync(path.join(serverRoot, '.patch-single-player-games-'));
@@ -24,7 +32,9 @@ try {
     throw new Error('Refusing to modify immutable baseline JAR; run apply-patches.cjs to assemble server/generated/zhiqu-server.jar');
   }
   if (!fs.existsSync(jarPath)) throw new Error(`Server jar not found: ${jarPath}`);
-  if (!fs.existsSync(migrationSource)) throw new Error(`Migration not found: ${migrationSource}`);
+  for (const migration of migrations) {
+    if (!fs.existsSync(migration.source)) throw new Error(`Migration not found: ${migration.source}`);
+  }
   const sources = fs.readdirSync(sourceRoot)
     .filter((name) => name.endsWith('.java'))
     .map((name) => path.join(sourceRoot, name));
@@ -47,17 +57,20 @@ try {
     ...sources,
   ], tempRoot);
 
-  const migrationTarget = path.join(tempRoot, migrationPath);
-  fs.mkdirSync(path.dirname(migrationTarget), { recursive: true });
-  fs.copyFileSync(migrationSource, migrationTarget);
+  for (const migration of migrations) {
+    const migrationTarget = path.join(tempRoot, migration.target);
+    fs.mkdirSync(path.dirname(migrationTarget), { recursive: true });
+    fs.copyFileSync(migration.source, migrationTarget);
+  }
 
-  run('jar', [
+  const jarArgs = [
     'uf', jarPath,
     '-C', tempRoot, classDirectory,
     '-C', tempRoot, securityClass,
-    '-C', tempRoot, migrationPath,
-  ], projectRoot);
-  console.log('Single-player games, V43 schema, public catalog, and generated media reads added to the generated server JAR');
+  ];
+  for (const migration of migrations) jarArgs.push('-C', tempRoot, migration.target);
+  run('jar', jarArgs, projectRoot);
+  console.log('Single-player games, V43/V45 schemas, prompt bank, and generated media reads added to the generated server JAR');
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 }

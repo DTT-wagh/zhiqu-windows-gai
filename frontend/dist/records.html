@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>记录中心 · 智趣</title>
+  <link rel="stylesheet" href="/records-reference.css">
+</head>
+<body>
+  <main class="records-app" id="records-app">
+    <header class="records-header">
+      <button class="records-back" type="button" aria-label="返回上一页" data-action="back">
+        <span aria-hidden="true">‹</span>
+      </button>
+      <div>
+        <p class="records-kicker">我的探索档案</p>
+        <h1>记录中心</h1>
+      </div>
+      <span class="records-header-mark" aria-hidden="true">✦</span>
+    </header>
+
+    <section class="records-intro" aria-labelledby="records-intro-title">
+      <div class="records-intro-copy">
+        <p class="records-eyebrow">RECENT EXPLORATION</p>
+        <h2 id="records-intro-title">把走过的路，留在这里</h2>
+        <p>按类型整理最近的游玩、观看和内容足迹。</p>
+      </div>
+      <div class="records-orbit" aria-hidden="true"><span></span><i></i><b></b></div>
+    </section>
+
+    <nav class="records-tabs" aria-label="记录类型" role="tablist">
+      <button type="button" role="tab" aria-selected="true" data-record-tab="play">游玩 <small>0</small></button>
+      <button type="button" role="tab" aria-selected="false" data-record-tab="watch">观看 <small>0</small></button>
+      <button type="button" role="tab" aria-selected="false" data-record-tab="browse">浏览 <small>0</small></button>
+    </nav>
+
+    <section class="records-panel" aria-live="polite">
+      <div class="records-panel-head">
+        <div>
+          <p class="records-panel-index">01 / RECENT</p>
+          <h2 id="records-panel-title">游玩记录</h2>
+        </div>
+        <span class="records-panel-note" id="records-panel-note">来自你的真实游戏记录</span>
+      </div>
+      <div class="records-list" id="records-list">
+        <div class="records-loading"><span></span><span></span><span></span>正在整理记录</div>
+      </div>
+    </section>
+
+    <p class="records-footnote">记录会随账号同步；没有内容时，这里会保持安静。</p>
+  </main>
+</body>
+</html>

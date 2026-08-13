@@ -8,7 +8,7 @@ const serverRoot = path.join(projectRoot, 'server');
 const manifestPath = path.join(__dirname, 'patch-manifest.json');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const baselinePath = path.resolve(projectRoot, manifest.baselineJar);
-const outputPath = path.join(serverRoot, 'generated', 'zhiqu-server.jar');
+const outputPath = path.resolve(process.env.ZHIQU_SERVER_OUTPUT || path.join(serverRoot, 'generated', 'zhiqu-server.jar'));
 
 function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex').toUpperCase();

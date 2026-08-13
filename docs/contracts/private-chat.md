@@ -18,6 +18,12 @@
 
 查询至少 2 个字符，最多返回 20 条结果。每项包含 `id`、`username`、`nickname`、`publicProfileId` 和 `avatarKey`。
 
+### 按公开资料 ID 获取笔友
+
+`GET /api/chat/friends/by-profile/{publicProfileId}`
+
+仅用于从“共学笔友”进入私聊。公开资料必须属于当前用户已接受的笔友；成功时返回 `id`、`username`、`nickname`、`publicProfileId` 和 `avatarKey`，不是笔友或资料不存在时返回 `404`。该接口只读取资料，不创建会话，也不修改好友关系。
+
 ### 会话列表
 
 `GET /api/chat/conversations`

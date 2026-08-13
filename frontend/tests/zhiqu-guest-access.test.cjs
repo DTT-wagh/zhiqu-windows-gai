@@ -450,6 +450,59 @@ function verifyGuestSettingsLoginPrompt() {
 
 verifyGuestSettingsLoginPrompt();
 
+function verifyGuestProfileLoginAction() {
+  const profileRoot = new TestElement('html');
+  const profileHead = new TestElement('head');
+  const unrelatedLogin = new TestElement('button');
+  const editButton = new TestElement('button');
+  let assignedProfileUrl = null;
+
+  unrelatedLogin.setAttribute('data-zq-guest-login', 'true');
+  unrelatedLogin.textContent = '其他登录入口';
+  editButton.setAttribute('aria-label', '编辑资料');
+  profileRoot.appendChild(unrelatedLogin);
+  profileRoot.appendChild(editButton);
+
+  const profileDocument = {
+    documentElement: profileRoot,
+    head: profileHead,
+    readyState: 'complete',
+    createElement(tagName) { return new TestElement(tagName); },
+    querySelector(selector) {
+      if (selector === '[data-zq-guest-profile-login="true"]') {
+        return editButton.getAttribute('data-zq-guest-profile-login') === 'true' ? editButton : null;
+      }
+      if (selector.includes('[aria-label="编辑资料"]')) return editButton;
+      return null;
+    },
+    querySelectorAll(selector) { return selector === '[dir="auto"]' ? [] : profileRoot.querySelectorAll(selector); },
+    addEventListener() {},
+  };
+  const profileWindow = {
+    location: { pathname: '/profile', search: '', assign(url) { assignedProfileUrl = url; } },
+    localStorage: { getItem() { return null; } },
+    fetch() { return Promise.resolve({ ok: true, json: () => Promise.resolve({}) }); },
+    setTimeout(callback) { callback(); },
+  };
+  const profileContext = {
+    window: profileWindow,
+    document: profileDocument,
+    URLSearchParams,
+    MutationObserver: class MutationObserver { observe() {} },
+    globalThis: null,
+  };
+  profileContext.globalThis = profileContext;
+  vm.runInNewContext(source, profileContext, { filename: 'zhiqu-guest-access.js' });
+
+  assert.equal(editButton.textContent, '登录', 'the guest profile edit icon must become a visible login command');
+  assert.equal(editButton.getAttribute('aria-label'), '登录');
+  assert.equal(editButton.getAttribute('data-zq-guest-profile-login'), 'true');
+  assert.equal(unrelatedLogin.textContent, '其他登录入口', 'unrelated login controls must not be selected as the profile action');
+  assert.equal(assignedProfileUrl, null, 'rendering the guest profile action must not navigate until it is clicked');
+}
+
+verifyGuestProfileLoginAction();
+
 const document = {
   documentElement: {},
   head: { appendChild() {} },
@@ -493,7 +546,11 @@ context.globalThis = context;
 vm.runInNewContext(source, context, { filename: 'zhiqu-guest-access.js' });
 
 assert.equal(window.__zqIsGuestSession(), true, 'a browser without a session must be treated as a guest');
+assert.match(source, /function findGuestProfileAction\(\)[\s\S]*?data-zq-guest-profile-login/, 'guest profile must locate only its own login action');
+assert.match(source, /aria-label="\\u7f16\\u8f91\\u8d44\\u6599"/, 'guest profile must recognize the compact edit-profile label');
+assert.match(source, /loginButton\.setAttribute\('data-zq-guest-profile-login', 'true'\)/, 'the converted profile action must remain identifiable after rerenders');
 assert.match(source, /if \(\(loginButton\.textContent \|\| ''\)\.trim\(\) !== '\\u767b\\u5f55'\)/, 'guest profile patch must not repeatedly mutate the login button');
+assert.match(source, /data-zq-guest-login="true"[\s\S]*?min-height:44px!important/, 'the guest login action must keep a 44px touch target');
 assert.match(securitySource, /requestMatchers\(HttpMethod\.GET, "\/api\/contents\/\*\/playback"\)\.permitAll\(\)/, 'published video playback must be public');
 assert.match(controllerSource, /return playbackService\.get\(contentId, userId\(authentication\)\);/, 'anonymous playback must not dereference a missing authentication');
 assert.match(controllerSource, /return authentication == null \? null : authentication\.getName\(\);/, 'account identity must remain nullable only for public reads');

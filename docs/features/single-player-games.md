@@ -17,6 +17,7 @@ Migration: V43
 - 页面复用 `zhiqu.auth.session.v1`，游客可浏览游戏介绍；开局、进度和奖励要求登录。
 - 公共状态机为 `INTRO -> GENERATING -> DEMO -> ROUND_ACTIVE -> EVALUATING -> FEEDBACK -> RESULT`，生成错误进入 `FAILED`；图片侦探生成完成后直接进入 `ROUND_ACTIVE`，提交 `r1` 后直接进入 `RESULT`。
 - 前端内部始终发送 `levelNo = 1`，不渲染关卡目录、锁定关卡或下一关。进度只显示每款游戏“未完成/已完成”。
+- 提示词小作家开局不询问年龄，也不发送年龄字段。所有年龄使用相同难度，三轮在介绍页从左到右呈现为“基础识别、进阶核对、综合比较”，内容要求逐轮增加。
 - 有效实例 ID 保存在本地，刷新后从服务端恢复；答案和评分规则从不保存在前端。
 - 图片侦探由 AI 只生成一张完整的日常生活图。程序从完整图分别删除三个真实、类别、用途和外形均明显不同的候选元素，并交给独立视觉模型复核识别变化；影响最大的元素形成唯一缺失图，三个候选裁剪卡都来自同一张完整图。候选卡明确呈现“类别 · 用途 · 位置”，避免三个选项看似都正确。完整图与缺失图在桌面和移动端始终并排，形成找不同式对照。关键元素以真实识别影响选定，而不是来自固定题库或文本模型预设答案。
 - 声音按本局结构化音符用 Web Audio 合成，并提供暂停、重复、音量、节奏条和文字替代；路线同时显示文字指标，颜色不是唯一判断依据。
@@ -47,6 +48,7 @@ DASHSCOPE_MODEL=qwen3.7-flash
 MAGIC_IMAGE_BASE_URL=
 MAGIC_IMAGE_API_KEY=
 MAGIC_IMAGE_MODEL=
+MAGIC_IMAGE_PROXY_URL=
 SINGLE_PLAYER_VISION_BASE_URL=
 SINGLE_PLAYER_VISION_API_KEY=
 SINGLE_PLAYER_VISION_MODEL=
@@ -54,7 +56,7 @@ SINGLE_PLAYER_IMAGE_TIMEOUT_SECONDS=90
 MEDIA_ROOT=./data/media
 ```
 
-可用 `SINGLE_PLAYER_AI_TIMEOUT_SECONDS` 调整文本与视觉模型的单次请求超时，默认 35 秒，限制为 1-120 秒。图片生成使用独立的 `SINGLE_PLAYER_IMAGE_TIMEOUT_SECONDS`，默认 90 秒，限制为 30-180 秒；服务繁忙或超时时最多自动重试一次。所有密钥只在后端读取。
+可用 `SINGLE_PLAYER_AI_TIMEOUT_SECONDS` 调整文本与视觉模型的单次请求超时，默认 35 秒，限制为 1-120 秒。图片生成使用独立的 `SINGLE_PLAYER_IMAGE_TIMEOUT_SECONDS`，默认 90 秒，限制为 30-180 秒；服务繁忙或超时时最多自动重试一次。运行环境无法直连图片供应商时，可将 `MAGIC_IMAGE_PROXY_URL` 设置为 HTTP 代理地址；留空时直接连接。所有密钥只在后端读取。
 
 ## 允许修改的文件
 

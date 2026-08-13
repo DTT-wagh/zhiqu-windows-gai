@@ -59,6 +59,11 @@ function errorText(payload) {
   assert.deepEqual(emptyConversations.payload, [], 'failed non-friend send must not create a conversation');
 
   assert.ok(bobSearchResult.publicProfileId, 'friend application requires a public profile id');
+  const unresolvedNonFriend = await request(
+    `/api/chat/friends/by-profile/${encodeURIComponent(bobSearchResult.publicProfileId)}`,
+    { token: aliceToken },
+  );
+  assert.equal(unresolvedNonFriend.status, 404, 'public profile lookup must not expose a non-friend');
   const friendRequest = await request('/api/social/friend-requests/by-profile', {
     method: 'POST',
     token: aliceToken,
@@ -70,6 +75,19 @@ function errorText(payload) {
     method: 'POST', token: bobToken, body: { requestId: randomUUID() },
   });
   assert.equal(accepted.status, 200, 'friend application should be accepted');
+
+  const resolvedFriend = await request(
+    `/api/chat/friends/by-profile/${encodeURIComponent(bobSearchResult.publicProfileId)}`,
+    { token: aliceToken },
+  );
+  assert.equal(resolvedFriend.status, 200, 'an accepted friend should resolve by public profile id');
+  assert.deepEqual(resolvedFriend.payload, {
+    id: bobId,
+    username: bob.user.username,
+    nickname: bob.user.nickname,
+    publicProfileId: bobSearchResult.publicProfileId,
+    avatarKey: bobSearchResult.avatarKey,
+  });
 
   const unsafeMessages = [
     ['手机号码', '我的电话是 13800138000'],
@@ -141,7 +159,7 @@ function errorText(payload) {
     result: 'ok',
     aliceId,
     bobId,
-    checks: 20 + unsafeMessages.length,
+    checks: 23 + unsafeMessages.length,
   }));
 })().catch((error) => {
   console.error(error);

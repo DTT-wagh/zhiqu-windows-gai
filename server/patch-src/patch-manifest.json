@@ -32,6 +32,10 @@
     {
       "name": "magic-friends",
       "script": "server/patch-src/patch-magic-friends.cjs"
+    },
+    {
+      "name": "magic-image-generation",
+      "script": "server/patch-src/patch-magic-image-generation.cjs"
     }
   ]
 }

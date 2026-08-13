@@ -28,8 +28,6 @@ if errorlevel 1 (
   echo WARNING: Server assembly failed. Starting the last successfully generated server.
 )
 
-if exist .env set SPRING_CONFIG_IMPORT=optional:file:.env[.properties]
-
 echo Starting Zhiqu API at http://localhost:8080 ...
-java -jar generated\zhiqu-server.jar
+java -jar generated\zhiqu-server.jar "--spring.config.import=optional:file:./.env[.properties]"
 pause

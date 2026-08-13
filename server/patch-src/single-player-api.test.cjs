@@ -54,9 +54,18 @@ let generationCounter = 0;
 let promptGenerationCounter = 0;
 let visionRequestCounter = 0;
 let imageRequestCounter = 0;
+let invalidPromptGroundingResponses = 0;
 
 function option(id, label, extra = {}) {
   return { id, label, ...extra };
+}
+
+function sourceFact(factId, fieldKey, value, evidenceQuote) {
+  return { factId, fieldKey, value, evidenceQuote };
+}
+
+function extractedFact(sourceFactId, fieldKey, value) {
+  return { sourceFactId, fieldKey, value };
 }
 
 function ability() {
@@ -81,59 +90,110 @@ function promptGame(levelNo) {
   const secondRoundIsMissing = promptGenerationCounter % 2 === 0;
   const rounds = [
     {
-      roundId: 'r1', title: `对象观察 ${suffix}`, original: `请观察这句实时短句 ${suffix}`,
-      aiExtracted: ['动作：整理'], prompt: '哪一项补清楚了对象？',
+      roundId: 'r1', title: `对象观察 ${suffix}`, original: `一位同学正在整理彩色积木，记录编号${suffix}。`,
+      sourceFacts: [
+        sourceFact('r1-person', 'audience', '一位同学', '一位同学正在整理彩色积木'),
+        sourceFact('r1-action', 'action', '整理', '正在整理彩色积木'),
+        sourceFact('r1-object', 'object', '彩色积木', '整理彩色积木'),
+      ],
+      extractedFacts: [
+        extractedFact('r1-action', 'action', '整理'),
+        extractedFact('r1-object', 'object', '彩色积木'),
+      ],
+      aiExtracted: ['动作：整理', '对象：彩色积木'], prompt: 'AI 已经正确提取了哪一项原文信息？',
       options: [
-        option('r1-good', '彩色积木', { fieldKey: 'object', value: '彩色积木', clear: true, ambiguous: false, conflictGroup: '', changedField: '' }),
-        option('r1-bad', '快一点', { fieldKey: 'action', value: '快一点', clear: false, ambiguous: true, conflictGroup: '', changedField: '' }),
+        option('r1-good', '对象：彩色积木', { factId: 'r1-object', fieldKey: 'object', value: '彩色积木', clear: true, ambiguous: false, conflictGroup: '', changedField: '' }),
+        option('r1-bad', '动作：整理', { factId: 'r1-action', fieldKey: 'action', value: '整理', clear: true, ambiguous: false, conflictGroup: '', changedField: '' }),
       ],
       answer: {
-        rule: { type: 'FIELD', targetField: 'object', ambiguousToken: '', conflictGroup: '', changedField: '' },
-        hint: '回到句子里，找出“整理什么”还没有说清。', feedback: '你补出了本句缺少的对象“彩色积木”。',
-        comparison: { before: '只知道整理', after: '知道整理彩色积木' }, ability: ability(),
+        rule: { type: 'FIELD', targetFactId: 'r1-object', targetField: 'object', ambiguousToken: '', conflictGroup: '', changedField: '' },
+        hint: '对照原文和 AI 提取结果。', feedback: '对象“彩色积木”在两边都出现了。',
+        comparison: { before: '原文有彩色积木', after: 'AI 提取了彩色积木' }, ability: ability(),
       },
     },
     {
       roundId: 'r2', title: `${secondRoundIsMissing ? '遗漏' : '含糊'}观察 ${suffix}`,
-      original: secondRoundIsMissing ? `把两张卡片放到左边 ${suffix}` : `把那个放到左边 ${suffix}`,
+      original: secondRoundIsMissing
+        ? `一位同学把两张卡片放到左边，记录编号${suffix}。`
+        : `一位同学把那个放到左边，记录编号${suffix}。`,
+      sourceFacts: secondRoundIsMissing
+        ? [
+          sourceFact('r2-person', 'audience', '一位同学', '一位同学把两张卡片放到左边'),
+          sourceFact('r2-quantity', 'quantity', '两张', '两张卡片'),
+          sourceFact('r2-object', 'object', '卡片', '两张卡片'),
+          sourceFact('r2-action', 'action', '放到', '放到左边'),
+          sourceFact('r2-location', 'location', '左边', '放到左边'),
+        ]
+        : [
+          sourceFact('r2-person', 'audience', '一位同学', '一位同学把那个放到左边'),
+          sourceFact('r2-object', 'object', '那个', '把那个放到左边'),
+          sourceFact('r2-action', 'action', '放到', '放到左边'),
+          sourceFact('r2-location', 'location', '左边', '放到左边'),
+        ],
+      extractedFacts: secondRoundIsMissing
+        ? [
+          extractedFact('r2-person', 'audience', '一位同学'),
+          extractedFact('r2-object', 'object', '卡片'),
+          extractedFact('r2-action', 'action', '放到'),
+          extractedFact('r2-location', 'location', '左边'),
+        ]
+        : [
+          extractedFact('r2-person', 'audience', '一位同学'),
+          extractedFact('r2-object', 'object', '不确定（那个）'),
+          extractedFact('r2-action', 'action', '放到'),
+          extractedFact('r2-location', 'location', '左边'),
+        ],
       aiExtracted: secondRoundIsMissing ? ['动作：放置', '位置：左边'] : ['对象：不确定', '位置：左边'],
       prompt: secondRoundIsMissing ? 'AI 漏掉了哪一项信息？' : 'AI 的哪一项提取仍不确定？',
       options: secondRoundIsMissing
         ? [
-          option('r2-good', '数量：两张', { fieldKey: 'quantity', value: '两张', clear: false, ambiguous: false, conflictGroup: '', changedField: '' }),
-          option('r2-bad', '位置：左边', { fieldKey: 'location', value: '左边', clear: true, ambiguous: false, conflictGroup: '', changedField: '' }),
+          option('r2-good', '数量：两张', { factId: 'r2-quantity', fieldKey: 'quantity', value: '两张', clear: false, ambiguous: false, conflictGroup: '', changedField: '' }),
+          option('r2-bad', '地点：左边', { factId: 'r2-location', fieldKey: 'location', value: '左边', clear: true, ambiguous: false, conflictGroup: '', changedField: '' }),
         ]
         : [
-          option('r2-good', '对象：“那个”', { fieldKey: 'object', value: '那个', clear: false, ambiguous: true, conflictGroup: '', changedField: '' }),
-          option('r2-bad', '位置：左边', { fieldKey: 'location', value: '左边', clear: true, ambiguous: false, conflictGroup: '', changedField: '' }),
+          option('r2-good', '对象：“那个”', { factId: 'r2-object', fieldKey: 'object', value: '那个', clear: false, ambiguous: true, conflictGroup: '', changedField: '' }),
+          option('r2-bad', '地点：左边', { factId: 'r2-location', fieldKey: 'location', value: '左边', clear: true, ambiguous: false, conflictGroup: '', changedField: '' }),
         ],
       answer: secondRoundIsMissing
         ? {
-          rule: { type: 'MISSING', targetField: 'quantity', ambiguousToken: '', conflictGroup: '', changedField: '' },
+          rule: { type: 'MISSING', targetFactId: 'r2-quantity', targetField: 'quantity', ambiguousToken: '', conflictGroup: '', changedField: '' },
           hint: '比较原句和 AI 提取结果中的数量。', feedback: '原句写了“两张”，但 AI 没有提取数量。',
           comparison: { before: '原句包含两张', after: 'AI 结果没有数量' }, ability: ability(),
         }
         : {
-          rule: { type: 'AMBIGUITY', targetField: 'object', ambiguousToken: '那个', conflictGroup: '', changedField: '' },
+          rule: { type: 'AMBIGUITY', targetFactId: 'r2-object', targetField: 'object', ambiguousToken: '那个', conflictGroup: '', changedField: '' },
           hint: '找出不能直接知道具体对象的词。', feedback: '“那个”没有说明具体对象，所以 AI 仍然不确定。',
           comparison: { before: '原句使用“那个”', after: 'AI 标记对象不确定' }, ability: ability(),
         },
     },
     {
-      roundId: 'r3', title: `单变量观察 ${suffix}`, original: `只改变地点，看看提取怎样变化 ${suffix}`,
-      aiExtracted: ['对象：图形', '地点：桌面'], prompt: '哪一项只改变了地点？',
+      roundId: 'r3', title: `单变量观察 ${suffix}`,
+      original: `画三朵花，记录编号${suffix}。`,
+      sourceFacts: [
+        sourceFact('r3-object', 'object', '花', '画三朵花'),
+        sourceFact('r3-action', 'action', '画', '画三朵花'),
+        sourceFact('r3-quantity', 'quantity', '三朵', '画三朵花'),
+      ],
+      extractedFacts: [
+        extractedFact('r3-object', 'object', '花'),
+        extractedFact('r3-action', 'action', '画'),
+        extractedFact('r3-quantity', 'quantity', '三朵'),
+      ],
+      aiExtracted: ['对象：花', '数量：三朵', '动作：画'],
+      prompt: '如果把“画三朵花”改成“画五朵花”，哪个信息改变了？',
       options: [
-        option('r3-good', '地点改为展示架', { fieldKey: 'location', value: '展示架', clear: true, ambiguous: false, conflictGroup: '', changedField: 'location' }),
-        option('r3-bad', '数量和地点都改变', { fieldKey: 'quantity', value: '三个', clear: true, ambiguous: false, conflictGroup: '', changedField: 'multiple' }),
+        option('r3-quantity-option', '数量从“三朵”变成“五朵”', { factId: 'r3-quantity', fieldKey: 'quantity', beforeValue: '三朵', afterValue: '五朵', value: '五朵', changedField: 'quantity' }),
+        option('r3-object-option', '对象从“花”变成“树”', { factId: 'r3-object', fieldKey: 'object', beforeValue: '花', afterValue: '树', value: '树', changedField: 'object' }),
+        option('r3-action-option', '动作从“画”变成“折”', { factId: 'r3-action', fieldKey: 'action', beforeValue: '画', afterValue: '折', value: '折', changedField: 'action' }),
       ],
       answer: {
-        rule: { type: 'CHANGE', targetField: '', ambiguousToken: '', conflictGroup: '', changedField: 'location' },
-        hint: '检查前后是不是只有地点一个字段不同。', feedback: '这次只改变地点，所以可以把判断变化和地点联系起来。',
-        comparison: { before: '地点是桌面', after: '地点是展示架' }, ability: ability(),
+        rule: { type: 'CHANGE', targetFactId: 'r3-action', targetField: 'action', ambiguousToken: '', conflictGroup: '', changedField: 'action' },
+        hint: '模型故意给错了规则。', feedback: '模型故意给错了规则。',
+        comparison: { before: '模型声称动作改变', after: '程序应根据题干纠正' }, ability: ability(),
       },
     },
   ];
-  return {
+  const game = {
     safety: { status: 'REJECTED', reason: '模拟本地儿童安全误判，完整关卡仍应通过' },
     instruction: `观察本局句子怎样被 AI 拆成字段，${suffix}。`,
     demo: {
@@ -141,11 +201,41 @@ function promptGame(levelNo) {
       explanation: '补上本局生成的对象后，AI 提取的信息多了一项。',
     },
     rounds,
-    result: resultDetails(
-      `我发现 ${suffix} 中，一个字段变化会让 AI 的提取结果跟着变化。`,
-      'AI 只能读取句子里已有的信息，不知道没有写出的真实想法。',
-    ),
+    result: { discovery: `模型只返回了不完整总结 ${suffix}` },
   };
+  if (invalidPromptGroundingResponses > 0) {
+    invalidPromptGroundingResponses -= 1;
+    game.rounds[1] = {
+      roundId: 'r2', title: '错误遗漏观察',
+      original: '在公园里，小明和小红一起喂了 3 只鸽子。',
+      sourceFacts: [
+        sourceFact('bad-location', 'location', '公园', '在公园里'),
+        sourceFact('bad-person', 'audience', '小明和小红', '小明和小红一起喂了 3 只鸽子'),
+        sourceFact('bad-action', 'action', '喂', '一起喂了 3 只鸽子'),
+        sourceFact('bad-quantity', 'quantity', '3 只', '3 只鸽子'),
+        sourceFact('bad-object', 'object', '鸽子', '3 只鸽子'),
+      ],
+      extractedFacts: [
+        extractedFact('bad-location', 'location', '公园'),
+        extractedFact('bad-person', 'audience', '小明和小红'),
+        extractedFact('bad-action', 'action', '喂'),
+        extractedFact('bad-quantity', 'quantity', '3 只'),
+        extractedFact('bad-object', 'object', '鸽子'),
+      ],
+      aiExtracted: ['地点：公园', '人物：小明和小红', '动作：喂', '数量：3 只', '对象：鸽子'],
+      prompt: 'AI 漏掉了哪一项信息？',
+      options: [
+        option('r2-good', 'AI 漏掉了时间', { factId: 'bad-time', fieldKey: 'condition', value: '时间', clear: false, ambiguous: false, conflictGroup: '', changedField: '' }),
+        option('r2-bad', 'AI 没说喂什么食物', { factId: 'bad-food', fieldKey: 'object', value: '食物', clear: false, ambiguous: false, conflictGroup: '', changedField: '' }),
+      ],
+      answer: {
+        rule: { type: 'MISSING', targetFactId: 'bad-time', targetField: 'condition', ambiguousToken: '', conflictGroup: '', changedField: '' },
+        hint: '想想鸽子吃什么。', feedback: 'AI 漏掉了喂食时间。',
+        comparison: { before: '原文没有时间', after: '声称 AI 漏掉时间' }, ability: ability(),
+      },
+    };
+  }
+  return game;
 }
 
 function routeGame() {
@@ -422,9 +512,11 @@ function assertNoAnswerSpec(value) {
 }
 
 async function create(baseUrl, token, gameCode, levelNo) {
+  const body = { requestId: randomUUID(), levelNo };
+  if (gameCode !== 'prompt-writer') body.ageBand = '6-8';
   const response = await request(baseUrl, `/api/single-player-games/${gameCode}/instances`, {
     method: 'POST', token,
-    body: { requestId: randomUUID(), levelNo, ageBand: '6-8' },
+    body,
   });
   assert.equal(response.status, 202, `create ${gameCode} level ${levelNo}`);
   return response.payload;
@@ -446,6 +538,8 @@ async function create(baseUrl, token, gameCode, levelNo) {
     assert.equal(catalogResponse.status, 200, 'catalog must be public');
     assert.equal(catalogResponse.payload.length, 4);
     assert.ok(catalogResponse.payload.every((game) => game.levelNo === 1 && !('levels' in game)));
+    assert.deepEqual(catalogResponse.payload.find((game) => game.gameCode === 'prompt-writer').ageBands, [],
+      'prompt writer must not advertise an age choice');
     assert.equal((await request(baseUrl, '/api/single-player-games/progress')).status, 401, 'progress must require JWT');
 
     const alice = await register(baseUrl, 'spalice');
@@ -456,15 +550,45 @@ async function create(baseUrl, token, gameCode, levelNo) {
 
     const invalidLevel = await request(baseUrl, '/api/single-player-games/prompt-writer/instances', {
       method: 'POST', token: alice.accessToken,
-      body: { requestId: randomUUID(), levelNo: 2, ageBand: '6-8' },
+      body: { requestId: randomUUID(), levelNo: 2 },
     });
     assert.equal(invalidLevel.status, 400, 'new instances must use the single levelNo=1 entry');
 
     const created = await create(baseUrl, alice.accessToken, 'prompt-writer', 1);
     const ready = await waitInstance(baseUrl, alice.accessToken, created.instanceId);
     assert.equal(ready.status, 'READY');
+    assert.equal(ready.contentVersion, 'spg-v6');
+    assert.equal(ready.ageBand, '9-10', 'prompt writer must use the unified internal content band without asking the child');
+    assert.match(ready.modelName, /^PromptBank-db:/);
     assert.equal(ready.content.rounds.length, 3);
+    assert.deepEqual(ready.content.rounds.map((round) => round.title.split('：')[0]), ['基础', '进阶', '综合']);
+    assert.ok(ready.content.rounds.every((round) => Array.isArray(round.sourceFacts) && Array.isArray(round.extractedFacts)));
+    assert.match(ready.content.rounds[0].prompt, /“(对象|动作|地点)”/, 'round one must name the target field so only one option is correct');
+    assert.ok(ready.content.rounds[1].sourceFacts.every((fact) => ready.content.rounds[1].original.includes(fact.evidenceQuote)));
+    assert.ok(ready.content.rounds[1].options.every((item) => item.factId && !/时间|食物/.test(item.label)));
+    assert.ok(ready.content.rounds[1].options.every((item) => !/AI 已提取|AI 未提取/.test(item.label)));
+    assert.ok(['evidence', 'aiCorrect', 'uncertain', 'change', 'discovery', 'limitation']
+      .every((key) => typeof ready.content.result[key] === 'string' && ready.content.result[key].length > 0));
     assertNoAnswerSpec(ready.content);
+    const fieldLabels = { object: '对象', action: '动作', location: '地点', quantity: '数量', audience: '人物' };
+    const r1TargetFact = ready.content.rounds[0].sourceFacts.find((fact) =>
+      ready.content.rounds[0].prompt.includes(`“${fieldLabels[fact.fieldKey]}”`));
+    const r2ExtractedIds = new Set(ready.content.rounds[1].extractedFacts.map((fact) => fact.sourceFactId));
+    const r2TargetFact = ready.content.rounds[1].sourceFacts.find((fact) => !r2ExtractedIds.has(fact.factId));
+    const r3TargetOption = ready.content.rounds[2].options.find((item) => item.afterValue !== item.beforeValue);
+    const correctOptionIds = {
+      r1: ready.content.rounds[0].options.find((item) => item.factId === r1TargetFact.factId).id,
+      r2: ready.content.rounds[1].options.find((item) => item.factId === r2TargetFact.factId).id,
+      r3: r3TargetOption.id,
+    };
+    assert.ok(ready.content.rounds[2].prompt.includes(r3TargetOption.beforeValue));
+    assert.ok(ready.content.rounds[2].prompt.includes(r3TargetOption.afterValue));
+    assert.ok(ready.content.rounds[2].changedOriginal.includes(r3TargetOption.afterValue));
+    assert.ok(ready.content.rounds[2].changedAiExtracted.some((item) => item.includes(r3TargetOption.afterValue)));
+    assert.equal(ready.content.rounds[2].options.filter((item) => item.afterValue !== item.beforeValue).length, 1);
+    assert.ok(ready.content.rounds[2].options.filter((item) => item.id !== r3TargetOption.id)
+      .every((item) => /没有改变/.test(item.label)));
+    const wrongR1Id = ready.content.rounds[0].options.find((item) => item.id !== correctOptionIds.r1).id;
 
     const foreignRead = await request(baseUrl, `/api/single-player-games/instances/${created.instanceId}`, { token: bob.accessToken });
     assert.equal(foreignRead.status, 404, 'another user must not read the instance');
@@ -472,7 +596,7 @@ async function create(baseUrl, token, gameCode, levelNo) {
     const wrongRequestId = randomUUID();
     const wrong = await request(baseUrl, `/api/single-player-games/instances/${created.instanceId}/rounds/r1/submit`, {
       method: 'POST', token: alice.accessToken,
-      body: { requestId: wrongRequestId, action: { selectedIds: ['r1-bad'] } },
+      body: { requestId: wrongRequestId, action: { selectedIds: [wrongR1Id] } },
     });
     assert.equal(wrong.status, 200);
     assert.equal(wrong.payload.correct, false);
@@ -484,7 +608,7 @@ async function create(baseUrl, token, gameCode, levelNo) {
     assert.equal(duplicateWrong.payload.submissionId, wrong.payload.submissionId, 'requestId must not be evaluated twice');
     assert.equal(duplicateWrong.payload.correct, false, 'duplicate request must keep its first evaluation');
 
-    for (const [roundId, optionId] of [['r1', 'r1-good'], ['r2', 'r2-good'], ['r3', 'r3-good']]) {
+    for (const [roundId, optionId] of Object.entries(correctOptionIds)) {
       const submission = await request(baseUrl, `/api/single-player-games/instances/${created.instanceId}/rounds/${roundId}/submit`, {
         method: 'POST', token: alice.accessToken,
         body: { requestId: randomUUID(), action: { selectedIds: [optionId] } },
@@ -519,6 +643,19 @@ async function create(baseUrl, token, gameCode, levelNo) {
     assert.equal(replay.payload.levelNo, 1);
     const replayReady = await waitInstance(baseUrl, alice.accessToken, replay.payload.instanceId);
     assert.equal(replayReady.status, 'READY', 'the MISSING comparison variant must generate successfully');
+    assert.match(replayReady.content.rounds[1].prompt, /原文中确实出现/);
+    assert.ok(replayReady.content.rounds[1].options.every((item) => !/AI 已提取|AI 未提取/.test(item.label)));
+
+    invalidPromptGroundingResponses = 1;
+    const hallucinatedCreated = await create(baseUrl, alice.accessToken, 'prompt-writer', 1);
+    const hallucinatedResult = await waitInstance(baseUrl, alice.accessToken, hallucinatedCreated.instanceId);
+    assert.equal(hallucinatedResult.status, 'READY', 'the reviewed database bank must remain available');
+    assert.match(hallucinatedResult.modelName, /^PromptBank-db:/);
+    assert.equal(hallucinatedResult.failureCode, null);
+    assert.ok(hallucinatedResult.content.rounds.flatMap((round) => round.options)
+      .every((item) => !/时间|食物|AI 已提取|AI 未提取/.test(item.label)));
+    assert.ok(hallucinatedResult.content.rounds[2].changedOriginal);
+    assert.equal(promptGenerationCounter, 0, 'runtime prompt games must not call live AI while reviewed database content exists');
 
     const routeCreated = await create(baseUrl, alice.accessToken, 'route-and-conditions', 1);
     const routeReady = await waitInstance(baseUrl, alice.accessToken, routeCreated.instanceId);
@@ -594,14 +731,16 @@ async function create(baseUrl, token, gameCode, levelNo) {
     unconfiguredProcess = startApi(noAiPort, providerPort, 'unconfigured', false);
     await waitForHealth(noAiBase, unconfiguredProcess);
     const unconfiguredUser = await register(noAiBase, 'spnoai');
-    const unavailable = await request(noAiBase, '/api/single-player-games/prompt-writer/instances', {
+    const bankOnlyCreated = await request(noAiBase, '/api/single-player-games/prompt-writer/instances', {
       method: 'POST', token: unconfiguredUser.accessToken,
-      body: { requestId: randomUUID(), levelNo: 1, ageBand: '6-8' },
+      body: { requestId: randomUUID(), levelNo: 1 },
     });
-    assert.equal(unavailable.status, 503, 'missing text model must be an explicit 503');
-    assert.equal(unavailable.payload.code, 'SINGLE_PLAYER_AI_NOT_CONFIGURED');
+    assert.equal(bankOnlyCreated.status, 202, 'the reviewed bank must work without a configured text model');
+    const bankOnlyReady = await waitInstance(noAiBase, unconfiguredUser.accessToken, bankOnlyCreated.payload.instanceId);
+    assert.equal(bankOnlyReady.status, 'READY');
+    assert.match(bankOnlyReady.modelName, /^PromptBank-db:/);
 
-    console.log(JSON.stringify({ result: 'ok', checks: 58, generatedInstances: 5 }));
+    console.log(JSON.stringify({ result: 'ok', checks: 82, generatedInstances: 7 }));
   } finally {
     await stopApi(apiProcess);
     await stopApi(unconfiguredProcess);

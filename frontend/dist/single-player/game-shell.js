@@ -119,6 +119,18 @@
     return gameCode === 'image-detective' ? 1 : 3;
   }
 
+  function needsAgeBand() {
+    return gameCode !== 'prompt-writer';
+  }
+
+  function promptDifficulty(roundIndex) {
+    return [
+      ['基础', '识别 AI 已经提取的明确信息'],
+      ['进阶', '核对遗漏、含糊或冲突的信息'],
+      ['综合', '比较只改变一个信息后的结果']
+    ][Math.max(0, Math.min(2, roundIndex))];
+  }
+
   function stopRequests() {
     if (state.abortController) state.abortController.abort();
     state.abortController = null;
@@ -214,9 +226,13 @@
     loop.className = 'sp-loop';
     var loopItems = gameCode === 'image-detective'
       ? [['01', '左右找不同'], ['02', '选关键元素'], ['03', '查看总结']]
-      : [['01', '看 AI 提取'], ['02', '和自己比'], ['03', '改一个信息']];
+      : gameCode === 'prompt-writer'
+        ? [['基础', '找出已提取的信息'], ['进阶', '核对遗漏或含糊'], ['综合', '比较单项变化']]
+        : [['01', '看 AI 提取'], ['02', '和自己比'], ['03', '改一个信息']];
+    if (gameCode === 'prompt-writer') loop.classList.add('sp-difficulty-flow');
     loopItems.forEach(function (item) {
       var step = document.createElement('span');
+      if (gameCode === 'prompt-writer') step.dataset.difficulty = item[0];
       var number = document.createElement('b');
       number.textContent = item[0];
       step.appendChild(number);
@@ -237,7 +253,7 @@
     completion.appendChild(completionCopy);
     intro.appendChild(completion);
 
-    if (state.showAgePicker) intro.appendChild(agePicker());
+    if (needsAgeBand() && state.showAgePicker) intro.appendChild(agePicker());
     var actions = document.createElement('div');
     actions.className = 'sp-actions';
     var start = document.createElement('button');
@@ -249,7 +265,7 @@
     var note = document.createElement('span');
     note.className = 'sp-hint-text';
     note.textContent = api.session()
-      ? '开局后由 AI 实时生成，本局有效期 24 小时。'
+      ? '开局后优先使用审核题库；题库不可用时再尝试实时生成，本局有效期 24 小时。'
       : '游客可查看游戏介绍；生成、进度和奖励需要登录。';
     actions.appendChild(note);
     intro.appendChild(actions);
@@ -297,6 +313,8 @@
     var copy = document.createElement('p');
     copy.textContent = gameCode === 'image-detective'
       ? '正在生成完整图，从同一张图删除元素，并让视觉模型核对每次识别。'
+      : gameCode === 'prompt-writer'
+        ? '正在创建从基础识别到综合比较的三轮观察材料。'
       : gameCode === 'route-and-conditions'
         ? '正在生成抽象图，随后由路线程序检查每个数字和条件。'
         : '正在根据本局目标和年龄段创建新的观察材料。';
@@ -354,11 +372,18 @@
     var round = currentRound();
     if (!round) return fail({ code: 'ROUND_CONTENT_MISSING', message: '本轮内容不可用' });
     main.classList.add('sp-stage');
+    var difficulty = gameCode === 'prompt-writer'
+      ? promptDifficulty(state.instance.currentRound)
+      : null;
     stageHeader(
       main,
-      gameCode === 'image-detective' ? '唯一关卡' : '第 ' + (state.instance.currentRound + 1) + ' 轮',
+      gameCode === 'image-detective'
+        ? '唯一关卡'
+        : difficulty
+          ? '第 ' + (state.instance.currentRound + 1) + ' 轮 · ' + difficulty[0]
+          : '第 ' + (state.instance.currentRound + 1) + ' 轮',
       round.title || '观察并核对',
-      round.prompt
+      difficulty ? difficulty[1] + '。' + round.prompt : round.prompt
     );
     var workspace = document.createElement('div');
     workspace.className = 'sp-workspace';
@@ -641,6 +666,7 @@
       IMAGE_PROVIDER_BUSY: '图片生成服务暂时繁忙，自动重试后仍未成功。',
       VISION_AI_TIMEOUT: '图片识别服务响应较慢，请重新试一次。',
       VISION_PROVIDER_BUSY: '图片识别服务暂时繁忙，请稍后重新试一次。',
+      PROMPT_GROUNDING_INVALID: '题目中的选项缺少原文证据，请重新生成一局。',
       GENERATION_INTERRUPTED: '生成过程因服务重启中断，请重新试一次。',
       UNAUTHORIZED: '登录状态已失效，请返回大厅重新登录。'
     };
@@ -680,7 +706,7 @@
       global.location.assign(api.loginUrl());
       return;
     }
-    if (!sessionHasBirthDate() && !state.ageBand) {
+    if (needsAgeBand() && !sessionHasBirthDate() && !state.ageBand) {
       state.showAgePicker = true;
       render();
       return;
@@ -697,11 +723,12 @@
     machine.transition('START');
     render();
     var activeController = controller();
-    api.createInstance(gameCode, {
+    var createBody = {
       requestId: state.createRequestId,
-      levelNo: levelNo,
-      ageBand: sessionHasBirthDate() ? null : state.ageBand
-    }, activeController.signal).then(handleInstance).catch(function (error) {
+      levelNo: levelNo
+    };
+    if (needsAgeBand() && !sessionHasBirthDate()) createBody.ageBand = state.ageBand;
+    api.createInstance(gameCode, createBody, activeController.signal).then(handleInstance).catch(function (error) {
       if (activeController.signal.aborted) return;
       fail(error);
     });
@@ -710,6 +737,18 @@
   function handleInstance(instance) {
     if (!instance || instance.levelNo !== 1) {
       fail({ code: 'SINGLE_PLAYER_LEVEL_INVALID', message: '本游戏只有一个统一入口' });
+      return;
+    }
+    if (gameCode === 'prompt-writer' && instance.contentVersion !== 'spg-v6') {
+      removeStorage(activeKey());
+      removeStorage(legacyActiveKey());
+      state.instance = null;
+      state.content = null;
+      state.finish = null;
+      state.error = null;
+      state.statusNote = '题目事实校验已更新，请开始新的一局';
+      machine.force(STATES.INTRO);
+      render();
       return;
     }
     if (gameCode === 'image-detective' && instance.content

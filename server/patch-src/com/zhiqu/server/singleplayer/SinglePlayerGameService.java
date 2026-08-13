@@ -47,7 +47,8 @@ import tools.jackson.databind.node.ObjectNode;
 public class SinglePlayerGameService {
     private static final Logger LOGGER = LoggerFactory.getLogger(SinglePlayerGameService.class);
     private static final int SINGLE_LEVEL = 1;
-    private static final String CONTENT_VERSION = "spg-v2";
+    private static final String CONTENT_VERSION = "spg-v6";
+    private static final String UNIFIED_PROMPT_AGE_BAND = "9-10";
     private static final Duration INSTANCE_TTL = Duration.ofHours(24);
     private static final Pattern PRIVATE_TEXT = Pattern.compile(
             "(?i)(1[3-9]\\d{9}|[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}|QQ|微信|wechat|住址|学校|身份证)"
@@ -119,7 +120,7 @@ public class SinglePlayerGameService {
 
         SinglePlayerGameGenerator generator = generator(gameCode);
         generator.ensureConfigured();
-        String ageBand = resolveAgeBand(userId, request.ageBand());
+        String ageBand = resolveAgeBand(gameCode, userId, request.ageBand());
         Instant now = Instant.now();
         String instanceId = UUID.randomUUID().toString();
         InstanceRow row = new InstanceRow(
@@ -391,7 +392,8 @@ public class SinglePlayerGameService {
         return definition;
     }
 
-    private String resolveAgeBand(String userId, String requested) {
+    private String resolveAgeBand(String gameCode, String userId, String requested) {
+        if ("prompt-writer".equals(gameCode)) return UNIFIED_PROMPT_AGE_BAND;
         LocalDate birthDate = repository.birthDate(userId).orElse(null);
         if (birthDate != null) {
             int age = Period.between(birthDate, LocalDate.now(ZoneId.of("Asia/Shanghai"))).getYears();
@@ -502,7 +504,10 @@ public class SinglePlayerGameService {
         GameSummary summary() {
             return new GameSummary(
                     gameCode, title, subject, description, learningGoal,
-                    List.of("6-8", "9-10", "11-12"), estimatedMinutes, SINGLE_LEVEL
+                    "prompt-writer".equals(gameCode)
+                            ? List.of()
+                            : List.of("6-8", "9-10", "11-12"),
+                    estimatedMinutes, SINGLE_LEVEL
             );
         }
     }

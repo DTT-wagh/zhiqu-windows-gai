@@ -194,7 +194,11 @@ assert.match(server, /\['\[id\]', '\[section\]'\]/, 'parameterized route documen
 assert.match(server, /standaloneAssistant/, 'assistant route should use a standalone document');
 assert.doesNotMatch(server, /tabsTransitionSource|tabsTransitionPatched/, 'static service must not rewrite the native tab transition');
 assert.match(standalonePage, /<body><\/body>/, 'standalone assistant document must not contain pre-rendered chat text');
-assert.match(server, /!standaloneAssistant && !standaloneSinglePlayer && !html\.includes/, 'standalone assistant document must not load unrelated recommendation enhancements');
+assert.match(
+  server,
+  /!standaloneAssistant && !standaloneRecords && !standaloneSinglePlayer && !standaloneMagicLobby && !html\.includes/,
+  'standalone documents must not load unrelated recommendation enhancements',
+);
 assert.match(assistantController, /@DeleteMapping\("\/requests\/\{requestId\}"\)/, 'backend must expose an authenticated cancellation endpoint');
 assert.match(assistantClient, /httpClient\.sendAsync/, 'provider generation must use a cancellable asynchronous HTTP request');
 assert.match(assistantClient, /private ApiException providerFailure\(int statusCode, String responseBody\)/, 'provider failures must be classified before reaching the generic UI message');

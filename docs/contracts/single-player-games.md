@@ -41,7 +41,7 @@
     "subject": "语文表达、阅读理解",
     "description": "...",
     "learningGoal": "...",
-    "ageBands": ["6-8", "9-10", "11-12"],
+    "ageBands": [],
     "estimatedMinutes": 6,
     "levelNo": 1
   }
@@ -63,15 +63,15 @@
 ### `POST /api/single-player-games/{gameCode}/instances`
 
 ```json
-{"requestId":"uuid","levelNo":1,"ageBand":"6-8"}
+{"requestId":"uuid","levelNo":1}
 ```
 
-- 资料有 `birth_date` 时服务端计算年龄段并忽略请求年龄段。
-- 资料不足时必须传 `6-8`、`9-10` 或 `11-12`。
+- 提示词小作家不询问年龄，请求不传 `ageBand`；服务端忽略资料生日和旧客户端传入的年龄值，始终使用相同难度。
+- 其他三款游戏暂时保留年龄段兼容逻辑：资料有 `birth_date` 时由服务端计算，资料不足时传 `6-8`、`9-10` 或 `11-12`。
 - `levelNo` 只接受 `1`；保留该字段是为了兼容现有数据库。
-- 只向模型发送年龄段、本游戏学习目标和随机种子；不发送生日、姓名、学校、地址或联系方式。
+- 提示词小作家的实时模型上下文只发送统一难度策略、本游戏学习目标和随机种子，不发送年龄；其他需要实时模型的游戏仍发送年龄段。所有游戏都不发送生日、姓名、学校、地址或联系方式。
 - 返回 `202` 和 `GENERATING`。同一用户重复使用相同 `requestId` 返回原实例。
-- 文本模型未配置时返回 `503 SINGLE_PLAYER_AI_NOT_CONFIGURED`。
+- 提示词小作家可直接使用数据库审核题库，不要求文本模型配置；其他文本生成游戏未配置时返回 `503 SINGLE_PLAYER_AI_NOT_CONFIGURED`。
 - 图片模型或视觉模型未配置时分别返回 `503 SINGLE_PLAYER_IMAGE_NOT_CONFIGURED`、`503 SINGLE_PLAYER_VISION_NOT_CONFIGURED`，不创建假图片实例。
 
 ### `GET /api/single-player-games/instances/{instanceId}`
@@ -84,7 +84,7 @@
   "ageBand": "9-10",
   "status": "READY",
   "currentRound": 0,
-  "contentVersion": "spg-v2",
+  "contentVersion": "spg-v6",
   "modelName": "...",
   "content": {"instruction":"...","rounds":[{}],"result":{}},
   "failureCode": null,
@@ -95,6 +95,22 @@
 ```
 
 `content` 只含可渲染内容。结果包含 `evidence`、`aiCorrect`、`uncertain`、`change`、`discovery` 和 `limitation`。图片侦探只请求生成一张完整生活图；程序从该图分别删除三个候选元素，并用视觉模型验证哪个删除最影响目标识别。公开内容只展示完整图、关键元素缺失图和三个候选卡，左右对照图位于唯一的 `r1` 中。数据库中的 `answer_spec_json`、候选元素的关键/无关角色、正确选项、求解器最优路径集合和隐藏反馈不会出现在响应中。`GENERATING` 时前端约每秒轮询；普通 HTTP 请求不等待图片生成完成。
+
+### 提示词小作家事实约束
+
+`spg-v6` 起，“提示词小作家”不按年龄分层，所有用户使用同一套难度标准。三轮固定从左到右、由易到难：`r1 基础识别 -> r2 进阶核对 -> r3 综合比较`。每轮内容必须同时包含 `sourceFacts` 和 `extractedFacts`。每个原文事实都有稳定 `factId`、字段、原值及 `evidenceQuote`，其中原值和证据必须逐字存在于 `original`。AI 提取项只能通过 `sourceFactId` 引用这些原文事实，公开的 `aiExtracted` 由服务端根据已校验事实重新生成。
+
+- `MISSING`：目标事实存在于原文事实中，但不存在于 AI 提取事实中。
+- `AMBIGUITY`：含糊词必须逐字出现在目标事实的原文证据中。
+- `CONFLICT`：同一个事实的原文值与 AI 提取值必须不同。
+- 第 1、2 轮选项只能引用已有 `factId`，标签只显示字段和值，不提前标注“AI 已提取/未提取”；提示、反馈和前后对比由服务端按证据生成。
+- 第 3 轮不采用模型自报的 `changedField`。服务端要求题干同时包含前值和后值，并从原文事实、`beforeValue`、`afterValue` 计算唯一变化，同时输出 `changedOriginal` 和 `changedAiExtracted` 供前端对照；其他选项改写为“没有改变，仍是原值”。
+- 结算 `result` 由三轮已校验反馈生成，不再因为模型漏写总结字段而返回 `GAME_RESULT_INVALID`。
+- 原文未出现的时间、食物或其他信息不能被描述为“AI 漏掉了”。事实关系不成立时丢弃该 AI 结果并切换审核题库，不向儿童展示错误题面。
+
+提示词小作家采用三级内容策略：优先从 `single_player_prompt_sets` 读取统一难度的 `APPROVED + enabled` 审核题；数据库题库为空或不可用时才尝试实时模型；模型失败后使用代码内置的 `PromptBank-v1`。服务器启动时写入三套经过相同事实校验的统一难度审核题。数据库来源的实例以 `PromptBank-db:*` 标记 `modelName`，不把生成失败转交给儿童反复重试。
+
+题库由 Flyway `V45__create_prompt_question_bank.sql` 创建。每条记录分别保存 `public_content_json` 和不得返回前端的 `answer_spec_json`，并记录年龄段、内容版本、来源、审核状态、启用状态和审核时间。后续修改已经执行过的题库结构必须新增迁移版本，不得编辑 `V45`。
 
 ## 提交
 
@@ -131,7 +147,7 @@
 
 ### `POST /api/single-player-games/instances/{instanceId}/regenerate`
 
-仅已完成实例可用于“再玩一次”。请求体为 `{"requestId":"uuid"}`；服务端使用同一 `gameCode`、`ageBand` 和新随机种子创建全新实例，返回 `202 GENERATING`。重复 `requestId` 返回同一新实例。
+仅已完成实例可用于“再玩一次”。请求体为 `{"requestId":"uuid"}`；服务端使用同一 `gameCode` 和新随机种子创建全新实例，返回 `202 GENERATING`。提示词小作家继续使用统一难度，其他游戏保留原实例年龄段。重复 `requestId` 返回同一新实例。
 
 ## 结算
 
@@ -157,7 +173,7 @@
 
 | HTTP | `code` | 含义 |
 | --- | --- | --- |
-| 400 | `SINGLE_PLAYER_AGE_BAND_REQUIRED` | 资料无生日且没有选择年龄段 |
+| 400 | `SINGLE_PLAYER_AGE_BAND_REQUIRED` | 非提示词小作家游戏在资料无生日且没有选择年龄段 |
 | 400 | `SINGLE_PLAYER_LEVEL_INVALID` | `levelNo` 不是 `1` |
 | 400 | `SINGLE_PLAYER_PRIVATE_TEXT_REJECTED` | 结算文字含私人信息模式 |
 | 404 | `SINGLE_PLAYER_INSTANCE_NOT_FOUND` | 不存在或不属于当前用户 |
@@ -167,6 +183,6 @@
 | 503 | `SINGLE_PLAYER_IMAGE_NOT_CONFIGURED` | 图片模型未配置 |
 | 503 | `SINGLE_PLAYER_VISION_NOT_CONFIGURED` | 视觉模型未配置 |
 
-异步失败在实例的 `status` 与 `failureCode` 中返回，例如 `TEXT_AI_TIMEOUT`、`IMAGE_AI_TIMEOUT`、`VISION_AI_TIMEOUT`、`AI_RESPONSE_INVALID`、`IMAGE_VISION_MISMATCH`。本地单人游戏儿童安全状态和文本扫描当前按产品要求停用，模型供应商自身的内容策略仍然有效。前端只显示“重试生成”和“返回大厅”，不会降级成固定题目。
+异步失败在实例的 `status` 与 `failureCode` 中返回，例如 `TEXT_AI_TIMEOUT`、`IMAGE_AI_TIMEOUT`、`VISION_AI_TIMEOUT`、`AI_RESPONSE_INVALID`、`IMAGE_VISION_MISMATCH`。提示词小作家的模型错误由审核题库兜底；其他游戏仍在失败页显示“重试生成”和“返回大厅”。本地单人游戏儿童安全状态和文本扫描当前按产品要求停用，模型供应商自身的内容策略仍然有效。
 
 文本与视觉请求使用 `SINGLE_PLAYER_AI_TIMEOUT_SECONDS`；图片生成使用独立的 `SINGLE_PLAYER_IMAGE_TIMEOUT_SECONDS`，默认 90 秒，最大 180 秒，并在超时或服务繁忙时最多自动重试一次。

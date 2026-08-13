@@ -98,9 +98,10 @@ const api = apiContext.ZhiquSinglePlayerApi;
   assert.equal(JSON.parse(storage.get('zhiqu.auth.session.v1')).accessToken, 'fresh-token');
 
   const requestId = api.createRequestId();
-  await api.createInstance('prompt-writer', { requestId, levelNo: 1, ageBand: '6-8' });
+  await api.createInstance('prompt-writer', { requestId, levelNo: 1 });
   const createCall = calls.at(-1);
   assert.equal(createCall.options.headers['X-Request-Id'], requestId, 'write requests must carry the idempotency header');
+  assert.equal('ageBand' in JSON.parse(createCall.options.body), false, 'prompt writer must start without asking for or sending an age band');
   assert.match(apiSource, /new AbortController\(\)/, 'requests must support cancellation');
   assert.match(apiSource, /REQUEST_TIMEOUT/, 'request timeout must have a distinct error code');
 
@@ -123,6 +124,11 @@ const api = apiContext.ZhiquSinglePlayerApi;
   assert.match(shellSource, /图片生成服务响应较慢/, 'image timeout must have a readable explanation');
   assert.match(shellSource, /图片生成服务暂时繁忙/, 'image provider failures must have a readable explanation');
   assert.match(shellSource, /生成过程因服务重启中断/, 'interrupted generation must have a readable explanation');
+  assert.match(shellSource, /题目中的选项缺少原文证据/, 'ungrounded prompt games must have a readable explanation');
+  assert.match(shellSource, /instance\.contentVersion !== 'spg-v6'/, 'legacy prompt games must not restore the pre-unified difficulty flow');
+  assert.match(shellSource, /gameCode !== 'prompt-writer'/, 'prompt writer must bypass the age picker');
+  assert.match(shellSource, /基础.*进阶.*综合/s, 'prompt writer must present a left-to-right increasing difficulty structure');
+  assert.match(shellSource, /difficultyPolicy|promptDifficulty|sp-difficulty-flow/, 'prompt writer must expose its unified progressive difficulty policy');
   assert.match(shellSource, /旧版图片关卡已更新/, 'legacy image detective instances must return to the new intro');
   assert.match(shellSource, /重试生成/, 'generation failure must offer retry');
   assert.match(shellSource, /返回大厅/, 'generation failure must offer lobby return');
@@ -133,6 +139,12 @@ const api = apiContext.ZhiquSinglePlayerApi;
   assert.match(shellSource, /再玩一次/, 'the result must offer replay as the primary action');
   assert.doesNotMatch(shellSource, /选择关卡|12 关可选|下一关/, 'the single-entry flow must not expose level navigation');
   assert.doesNotMatch(shellSource, /answerSpec|correctOptionIds|acceptedOptionIds/, 'answer specifications must not exist in frontend runtime');
+
+  const promptGame = fs.readFileSync(path.join(dist, 'single-player', 'prompt-writer.js'), 'utf8');
+  assert.match(promptGame, /round\.changedOriginal/, 'round three must render the changed original text');
+  assert.match(promptGame, /round\.changedAiExtracted/, 'round three must render the changed AI extraction');
+  assert.match(promptGame, /原始信息前后对比/, 'round three must label its source comparison');
+  assert.match(promptGame, /AI 提取结果前后对比/, 'round three must label its extraction comparison');
 
   const imageGame = fs.readFileSync(path.join(dist, 'single-player', 'image-detective.js'), 'utf8');
   assert.match(imageGame, /beforeImageUrl/, 'the image game must compare the original and one-variable variant');
@@ -148,7 +160,7 @@ const api = apiContext.ZhiquSinglePlayerApi;
   assert.match(soundGame, /round\.roundId === 'r3'/, 'the sound game must render a dedicated comparison in round three');
   assert.match(soundGame, /context\.content\.rounds\[1\]/, 'the sound comparison must include the unchanged source sequence');
 
-  console.log(JSON.stringify({ result: 'ok', checks: 72, games: 4, entries: 4 }));
+  console.log(JSON.stringify({ result: 'ok', checks: 78, games: 4, entries: 4 }));
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -22,6 +22,7 @@
   const state = {
     open: false,
     searchMode: false,
+    friendPickerMode: false,
     searchQuery: '',
     searchResults: [],
     friends: [],
@@ -86,7 +87,7 @@
 
   async function api(path, options = {}, retryAfterRefresh = true) {
     const currentSession = session();
-    if (!currentSession?.accessToken) throw new Error('请先登录后使用私聊');
+    if (!currentSession?.accessToken) throw new Error('请先登录后使用消息');
     const headers = new Headers(options.headers || {});
     headers.set('Accept', 'application/json');
     headers.set('Authorization', `Bearer ${currentSession.accessToken}`);
@@ -96,7 +97,7 @@
     if (response.status === 401 && retryAfterRefresh) {
       const nextSession = await refreshSession(currentSession);
       if (nextSession?.accessToken) return api(path, options, false);
-      throw new Error('登录已过期，请重新登录后使用私聊');
+      throw new Error('登录已过期，请重新登录后使用消息');
     }
     if (!response.ok) {
       let payload = null;
@@ -143,6 +144,7 @@
       #${ROOT_ID} .zq-social-panel:not(.zq-social-active-chat):not(.zq-social-search-panel) { height: min(520px, calc(100vh - 64px)); }
       #${ROOT_ID} .zq-social-sidebar { display: flex; min-width: 0; flex-direction: column; border-right: 1px solid #e4ddd1; background: #f7f4ec; }
       #${ROOT_ID} .zq-social-sidebar-header, #${ROOT_ID} .zq-social-chat-header { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #e4ddd1; }
+      #${ROOT_ID} .zq-social-sidebar-header-actions { display: flex; align-items: center; gap: 4px; }
       #${ROOT_ID} .zq-social-title { margin: 0; color: #243139; font-size: 19px; font-weight: 900; }
       #${ROOT_ID} .zq-social-subtitle { margin: 3px 0 0; color: #74808a; font-size: 12px; }
       #${ROOT_ID} .zq-social-icon-button { width: 38px; height: 38px; border-radius: 8px; background: transparent; color: #53616a; font-size: 23px; line-height: 38px; }
@@ -329,8 +331,14 @@
     root.querySelector('.zq-social-backdrop')?.remove();
     if (!state.open) return;
     const active = state.activePartner;
-    const panelTitle = active ? '聊天' : '私聊';
-    const panelSubtitle = active ? '和笔友继续交流学习' : '先添加笔友，成为好友后即可聊天';
+    const panelTitle = active ? '聊天' : state.searchMode ? '寻找笔友' : state.friendPickerMode ? '新建对话' : '消息';
+    const panelSubtitle = active
+      ? '和笔友继续交流学习'
+      : state.searchMode
+        ? '按账号或昵称添加新的笔友'
+        : state.friendPickerMode
+          ? '选择一位笔友开始聊天'
+          : '查看已有对话和未读消息';
     const panel = document.createElement('div');
     panel.className = `zq-social-backdrop ${active ? 'zq-social-chat-backdrop' : ''} ${options.entering ? 'zq-social-backdrop-enter' : ''}`;
     panel.innerHTML = `
@@ -338,14 +346,16 @@
         <aside class="zq-social-sidebar">
           <header class="zq-social-sidebar-header">
             <div><h2 class="zq-social-title">${panelTitle}</h2><p class="zq-social-subtitle">${panelSubtitle}</p></div>
-            <button type="button" class="zq-social-icon-button" data-action="close" aria-label="关闭">×</button>
+            <div class="zq-social-sidebar-header-actions">
+              ${!active && !state.searchMode ? `<button type="button" class="zq-social-icon-button" data-action="open-friend-picker" aria-label="${state.friendPickerMode ? '返回会话列表' : '新建对话'}" title="${state.friendPickerMode ? '返回会话列表' : '新建对话'}">${state.friendPickerMode ? '‹' : '+'}</button>` : ''}
+              <button type="button" class="zq-social-icon-button" data-action="close" aria-label="关闭">×</button>
+            </div>
           </header>
-          <button type="button" class="zq-social-search-action" data-action="toggle-search"><span>${state.searchMode ? '返回会话列表' : '找同学，不用笔友码'}</span><span>${state.searchMode ? '‹' : '⌕'}</span></button>
           ${state.error ? `<div class="zq-social-error">${escapeHtml(state.error)}</div>` : ''}
-          ${state.searchMode ? renderSearch() : renderConversationList()}
+          ${state.searchMode ? renderSearch() : state.friendPickerMode ? renderFriendPicker() : renderConversationList()}
         </aside>
         <main class="zq-social-chat">
-          ${active ? renderChatHeader(active) + renderMessages(active) : '<div class="zq-social-placeholder">选择一位笔友开始私聊。<br>还没有笔友？点击左侧“找同学”，按账号或昵称搜索。</div>'}
+          ${active ? renderChatHeader(active) + renderMessages(active) : '<div class="zq-social-placeholder">从消息列表继续已有交流。<br>新对话只能从已有笔友中选择。</div>'}
         </main>
       </section>`;
     panel.addEventListener('click', (event) => {
@@ -393,9 +403,29 @@
 
   function renderConversationList() {
     if (!state.conversations.length) {
-      return '<div class="zq-social-list"><div class="zq-social-empty">还没有私聊会话。<br>先找一位笔友聊聊吧。</div></div>';
+      return '<div class="zq-social-list"><div class="zq-social-empty">还没有消息。<br>点击右上角“新建对话”，选择已有笔友开始聊天。</div></div>';
     }
     return `<div class="zq-social-list">${state.conversations.map((item) => `<button type="button" class="zq-social-list-row ${state.activePartner?.id === item.partnerId ? 'active' : ''}" data-action="open-conversation" data-user-id="${escapeHtml(item.partnerId)}"><span>${avatar(item.nickname, item.avatarKey)}</span><span class="zq-social-row-copy"><span class="zq-social-row-name">${escapeHtml(item.nickname)}</span><span class="zq-social-row-preview">${escapeHtml(conversationPreview(item))}</span></span><span class="zq-social-row-meta">${Number(item.unreadCount) ? `<span class="zq-social-unread-small">${item.unreadCount > 9 ? '9+' : item.unreadCount}</span>` : escapeHtml(formatTime(item.lastAt))}</span></button>`).join('')}</div>`;
+  }
+
+  function friendPartner(friend) {
+    const student = friend?.student || friend || {};
+    return {
+      id: '',
+      publicProfileId: student.publicProfileId || '',
+      username: student.username || '',
+      nickname: student.nickname || student.username || '笔友',
+      avatarKey: student.avatarKey || '',
+      isFriend: true,
+    };
+  }
+
+  function renderFriendPicker() {
+    const partners = state.friends.map(friendPartner).filter((partner) => partner.publicProfileId);
+    if (!partners.length) {
+      return '<div class="zq-social-list"><div class="zq-social-empty">还没有可以聊天的笔友。<br>请先到“共学笔友”添加或接受笔友申请。</div></div>';
+    }
+    return `<div class="zq-social-list">${partners.map((partner) => `<button type="button" class="zq-social-list-row" data-action="open-friend-chat" data-profile-id="${escapeHtml(partner.publicProfileId)}"><span>${avatar(partner.nickname, partner.avatarKey)}</span><span class="zq-social-row-copy"><span class="zq-social-row-name">${escapeHtml(partner.nickname)}</span><span class="zq-social-row-preview">${partner.username ? `@${escapeHtml(partner.username)}` : '开始新对话'}</span></span><span class="zq-social-row-meta">›</span></button>`).join('')}</div>`;
   }
 
   function conversationPreview(item) {
@@ -520,6 +550,7 @@
     state.enteringMessageId = null;
     state.composerPanel = null;
     state.searchMode = false;
+    state.friendPickerMode = false;
     state.messages = [];
     state.loading = true;
     renderPanel(ensureRoot());
@@ -625,6 +656,7 @@
   function openPanel(searchMode) {
     state.open = true;
     state.searchMode = Boolean(searchMode);
+    state.friendPickerMode = false;
     state.error = '';
     const root = ensureRoot();
     renderPanel(root, { entering: true });
@@ -646,22 +678,23 @@
     const query = String(nickname || '').trim();
     openPanel(false);
     state.searchMode = false;
+    state.friendPickerMode = false;
     state.searchQuery = '';
     state.searchResults = [];
     state.loading = true;
     renderPanel(ensureRoot());
     try {
-      const results = await api(`/api/chat/users?q=${encodeURIComponent(query)}`) || [];
-      const item = results.find((candidate) => candidate.publicProfileId === profileId)
-        || results.find((candidate) => candidate.nickname === query);
-      if (!item) throw new Error('暂时找不到这位笔友的聊天入口，请稍后重试');
-      await openConversation({
-        id: item.id,
-        username: item.username || '',
-        nickname: item.nickname || query,
-        avatarKey: item.avatarKey,
-        isFriend: true,
-      }, 'chat');
+      await loadOverview();
+      const existing = state.conversations.find((candidate) => candidate.publicProfileId === profileId);
+      let partner = existing
+        ? { id: existing.partnerId, publicProfileId: existing.publicProfileId, username: existing.username || '', nickname: existing.nickname || query, avatarKey: existing.avatarKey, isFriend: true }
+        : null;
+      if (!partner) {
+        const item = await api(`/api/chat/friends/by-profile/${encodeURIComponent(profileId)}`);
+        if (item) partner = { id: item.id, publicProfileId: item.publicProfileId, username: item.username || '', nickname: item.nickname || query, avatarKey: item.avatarKey, isFriend: true };
+      }
+      if (!partner?.id) throw new Error('暂时找不到这位笔友的聊天入口，请稍后重试');
+      await openConversation(partner, 'chat');
     } catch (error) {
       state.loading = false;
       showError(error.message);
@@ -672,6 +705,7 @@
   function closePanel() {
     state.open = false;
     state.searchMode = false;
+    state.friendPickerMode = false;
     state.composerPanel = null;
     window.clearInterval(state.pollTimer);
     state.pollTimer = null;
@@ -692,16 +726,17 @@
       state.messages = [];
       state.error = '';
       state.searchMode = false;
+      state.friendPickerMode = false;
       state.composerPanel = null;
       return renderPanel(ensureRoot());
     }
     if (action === 'open-search') return openPanel(true);
     if (action === 'open-inbox') return openPanel(false);
-    if (action === 'toggle-search') {
+    if (action === 'open-friend-picker') {
       state.composerPanel = null;
-      state.searchMode = !state.searchMode;
+      state.searchMode = false;
+      state.friendPickerMode = !state.friendPickerMode;
       renderPanel(ensureRoot());
-      if (state.searchMode) document.querySelector('[data-chat-search]')?.focus();
       return;
     }
     if (action === 'open-conversation') {
@@ -716,6 +751,11 @@
         return renderPanel(ensureRoot());
       }
       return openConversation({ id: item.partnerId, username: item.username, nickname: item.nickname, avatarKey: item.avatarKey, status: item.status, requestedBy: item.requestedBy, isFriend: item.isFriend }, 'chat');
+    }
+    if (action === 'open-friend-chat') {
+      const item = state.friends.map(friendPartner).find((candidate) => candidate.publicProfileId === target.dataset.profileId);
+      if (item) return openChatForFriend(item.publicProfileId, item.nickname);
+      showError('这位笔友暂时无法开始对话，请刷新后重试');
     }
     if (action === 'add-result') {
       const item = state.searchResults.find((candidate) => candidate.id === target.dataset.userId);

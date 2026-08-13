@@ -83,6 +83,41 @@ public class PrivateChatController {
                 });
     }
 
+    @GetMapping("/friends/by-profile/{publicProfileId}")
+    public Map<String, Object> friendByPublicProfileId(
+            @PathVariable(name = "publicProfileId") String publicProfileId,
+            Authentication authentication) {
+        String currentUserId = currentUser(authentication);
+        List<Map<String, Object>> friends = jdbc.query(
+                """
+                SELECT u.id, u.username, u.nickname, sp.public_profile_id, sp.avatar_key
+                FROM social_profiles sp
+                JOIN users u ON u.id = sp.user_id AND u.status = 'ACTIVE'
+                JOIN friendships f ON f.status = 'ACTIVE'
+                  AND ((f.user_low_id = ? AND f.user_high_id = u.id)
+                    OR (f.user_high_id = ? AND f.user_low_id = u.id))
+                WHERE sp.public_profile_id = ?
+                """,
+                ps -> {
+                    ps.setString(1, currentUserId);
+                    ps.setString(2, currentUserId);
+                    ps.setString(3, publicProfileId);
+                },
+                (rs, row) -> {
+                    Map<String, Object> result = new LinkedHashMap<>();
+                    result.put("id", rs.getString("id"));
+                    result.put("username", rs.getString("username"));
+                    result.put("nickname", rs.getString("nickname"));
+                    result.put("publicProfileId", rs.getString("public_profile_id"));
+                    result.put("avatarKey", rs.getString("avatar_key"));
+                    return result;
+                });
+        if (friends.isEmpty()) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "CHAT_FRIEND_NOT_FOUND", "未找到这位笔友");
+        }
+        return friends.get(0);
+    }
+
     @GetMapping("/conversations")
     public List<Map<String, Object>> conversations(Authentication authentication) {
         String currentUserId = currentUser(authentication);

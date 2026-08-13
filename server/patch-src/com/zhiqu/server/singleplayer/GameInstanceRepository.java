@@ -202,6 +202,40 @@ public class GameInstanceRepository {
         }, userId).stream().filter(java.util.Objects::nonNull).findFirst();
     }
 
+    List<PromptSetRow> listApprovedPromptSets(String ageBand) {
+        return jdbc.query("""
+                SELECT id, age_band, content_version, public_content_json, answer_spec_json,
+                       source_type, source_model, review_status, enabled, reviewed_at, created_at, updated_at
+                FROM single_player_prompt_sets
+                WHERE age_band = ? AND review_status = 'APPROVED' AND enabled = TRUE
+                ORDER BY id
+                """, this::promptSetRow, ageBand);
+    }
+
+    void saveApprovedPromptSet(PromptSetRow row) {
+        int updated = jdbc.update("""
+                UPDATE single_player_prompt_sets
+                SET age_band = ?, content_version = ?, public_content_json = ?, answer_spec_json = ?,
+                    source_type = ?, source_model = ?, review_status = 'APPROVED', enabled = TRUE,
+                    reviewed_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                row.ageBand(), row.contentVersion(), row.publicContentJson(), row.answerSpecJson(),
+                row.sourceType(), row.sourceModel(), Timestamp.from(row.reviewedAt()), Timestamp.from(row.updatedAt()),
+                row.id());
+        if (updated > 0) return;
+        jdbc.update("""
+                INSERT INTO single_player_prompt_sets
+                    (id, age_band, content_version, public_content_json, answer_spec_json,
+                     source_type, source_model, review_status, enabled, reviewer_id,
+                     reviewed_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'APPROVED', TRUE, NULL, ?, ?, ?)
+                """,
+                row.id(), row.ageBand(), row.contentVersion(), row.publicContentJson(), row.answerSpecJson(),
+                row.sourceType(), row.sourceModel(), Timestamp.from(row.reviewedAt()),
+                Timestamp.from(row.createdAt()), Timestamp.from(row.updatedAt()));
+    }
+
     private InstanceRow instanceRow(ResultSet rs, int rowNum) throws SQLException {
         return new InstanceRow(
                 rs.getString("id"), rs.getString("user_id"), rs.getString("game_code"), rs.getInt("level_no"),
@@ -225,6 +259,16 @@ public class GameInstanceRepository {
                 rs.getString("user_id"), rs.getString("game_code"), rs.getInt("level_no"), rs.getBoolean("completed"),
                 rs.getString("ability_json"), rs.getString("best_result_json"), nullableInstant(rs, "completed_at"),
                 instant(rs, "updated_at")
+        );
+    }
+
+    private PromptSetRow promptSetRow(ResultSet rs, int rowNum) throws SQLException {
+        return new PromptSetRow(
+                rs.getString("id"), rs.getString("age_band"), rs.getString("content_version"),
+                rs.getString("public_content_json"), rs.getString("answer_spec_json"),
+                rs.getString("source_type"), rs.getString("source_model"),
+                rs.getString("review_status"), rs.getBoolean("enabled"),
+                nullableInstant(rs, "reviewed_at"), instant(rs, "created_at"), instant(rs, "updated_at")
         );
     }
 
@@ -280,6 +324,22 @@ public class GameInstanceRepository {
             String abilityJson,
             String bestResultJson,
             Instant completedAt,
+            Instant updatedAt
+    ) {
+    }
+
+    record PromptSetRow(
+            String id,
+            String ageBand,
+            String contentVersion,
+            String publicContentJson,
+            String answerSpecJson,
+            String sourceType,
+            String sourceModel,
+            String reviewStatus,
+            boolean enabled,
+            Instant reviewedAt,
+            Instant createdAt,
             Instant updatedAt
     ) {
     }
